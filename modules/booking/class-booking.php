@@ -55,7 +55,8 @@ final class HMN_CRM_Booking {
 		set_transient( 'hmn_crm_otp_rate_' . md5( $phone ), 1, MINUTE_IN_SECONDS );
 
 		$settings = get_option( 'hmn_crm_sms_settings', array() );
-		$body_id  = isset( $settings['otp_body_id'] ) && is_scalar( $settings['otp_body_id'] ) ? absint( $settings['otp_body_id'] ) : 0;
+		$body_value = isset( $settings['melipayamak_otp_body_id'] ) ? $settings['melipayamak_otp_body_id'] : ( isset( $settings['otp_body_id'] ) ? $settings['otp_body_id'] : 0 );
+		$body_id  = is_scalar( $body_value ) ? absint( $body_value ) : 0;
 		$sms      = new HMN_CRM_SMS();
 		$result   = $sms->send_pattern( $phone, $body_id, array( $code ) );
 
@@ -104,7 +105,8 @@ final class HMN_CRM_Booking {
 		}
 
 		$settings = get_option( 'hmn_crm_sms_settings', array() );
-		$body_id  = isset( $settings['booking_body_id'] ) && is_scalar( $settings['booking_body_id'] ) ? absint( $settings['booking_body_id'] ) : 0;
+		$body_value = isset( $settings['melipayamak_booking_body_id'] ) ? $settings['melipayamak_booking_body_id'] : ( isset( $settings['booking_body_id'] ) ? $settings['booking_body_id'] : 0 );
+		$body_id  = is_scalar( $body_value ) ? absint( $body_value ) : 0;
 		$args = array();
 		foreach ( array( 'name', 'user_name', 'date', 'appointment_date', 'time', 'appointment_time' ) as $key ) {
 			if ( isset( $data[ $key ] ) && is_scalar( $data[ $key ] ) ) {

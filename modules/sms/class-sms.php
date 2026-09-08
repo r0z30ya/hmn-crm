@@ -38,7 +38,8 @@ class HMN_CRM_SMS {
 		}
 
 		$settings = get_option( 'hmn_crm_sms_settings', array() );
-		$api_key  = isset( $settings['api_key'] ) && is_scalar( $settings['api_key'] ) ? sanitize_text_field( $settings['api_key'] ) : '';
+		$api_key_value = isset( $settings['melipayamak_api_key'] ) ? $settings['melipayamak_api_key'] : ( isset( $settings['api_key'] ) ? $settings['api_key'] : '' );
+		$api_key  = is_scalar( $api_key_value ) ? sanitize_text_field( $api_key_value ) : '';
 		if ( empty( $api_key ) ) {
 			return new WP_Error( 'hmn_crm_sms_missing_api_key', __( 'کلید API پیامک تنظیم نشده است.', 'hmn-crm' ) );
 		}

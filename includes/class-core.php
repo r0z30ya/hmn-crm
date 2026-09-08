@@ -33,6 +33,27 @@ final class HMN_CRM_Core {
 	 */
 	private function __construct() {
 		$this->load_modules();
+		add_action( 'admin_menu', array( $this, 'register_admin_menu' ) );
+	}
+
+	/** Register the HMN CRM top-level menu and module submenus. */
+	public function register_admin_menu() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		add_menu_page( 'HMN CRM', 'HMN CRM', 'manage_options', 'hmn-crm', array( $this, 'render_dashboard' ), 'dashicons-calendar-alt', 30 );
+		if ( class_exists( 'HMN_CRM_SMS_Settings' ) ) {
+			add_submenu_page( 'hmn-crm', 'تنظیمات پیامک', 'تنظیمات پیامک', 'manage_options', 'hmn-crm-sms', array( 'HMN_CRM_SMS_Settings', 'render_page' ) );
+		}
+	}
+
+	/** Render the top-level dashboard placeholder. */
+	public function render_dashboard() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		?><div class="wrap" dir="rtl"><h1><?php echo esc_html__( 'HMN CRM', 'hmn-crm' ); ?></h1><p><?php echo esc_html__( 'به داشبورد مدیریت HMN CRM خوش آمدید.', 'hmn-crm' ); ?></p></div><?php
 	}
 
 	/**
