@@ -26,10 +26,10 @@ class HMN_CRM_SMS {
 	 *
 	 * @param string       $to      Recipient mobile number.
 	 * @param int|string   $body_id Melipayamak pattern/body ID.
-	 * @param array        $args    Pattern values; each item has key and value.
+	 * @param array        $args    Pattern values in API order, e.g. array( '54321' ).
 	 * @return array|WP_Error Decoded API response or a WordPress error.
 	 */
-	public function send_pattern( $to, $body_id, $args = array() ) {
+	public function send_pattern( $to, $body_id, array $args ) {
 		$to      = is_scalar( $to ) ? sanitize_text_field( wp_unslash( (string) $to ) ) : '';
 		$body_id = is_scalar( $body_id ) ? absint( $body_id ) : 0;
 
@@ -44,19 +44,10 @@ class HMN_CRM_SMS {
 		}
 
 		$items = array();
-		foreach ( (array) $args as $item ) {
-			if ( ! is_array( $item ) || ! isset( $item['key'], $item['value'] ) ) {
-				continue;
+		foreach ( (array) $args as $value ) {
+			if ( is_scalar( $value ) ) {
+				$items[] = sanitize_text_field( wp_unslash( (string) $value ) );
 			}
-
-			if ( ! is_scalar( $item['key'] ) || ! is_scalar( $item['value'] ) ) {
-				continue;
-			}
-
-			$items[] = array(
-				'key'   => sanitize_text_field( wp_unslash( (string) $item['key'] ) ),
-				'value' => sanitize_text_field( wp_unslash( (string) $item['value'] ) ),
-			);
 		}
 
 		$payload = array(
