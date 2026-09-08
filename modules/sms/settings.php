@@ -69,7 +69,14 @@ final class HMN_CRM_SMS_Settings {
 	private function render_test_tab() {
 		$status = isset( $_GET['hmn_sms_test'] ) ? sanitize_key( wp_unslash( $_GET['hmn_sms_test'] ) ) : '';
 		if ( 'success' === $status ) { echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'پیامک آزمایشی با موفقیت ارسال شد.', 'hmn-crm' ) . '</p></div>'; }
-		if ( 'error' === $status ) { echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__( 'ارسال ناموفق بود؛ گزارش خطا را بررسی کنید.', 'hmn-crm' ) . '</p></div>'; }
+		if ( 'error' === $status ) {
+			$token = isset( $_GET['hmn_sms_test_token'] ) && is_scalar( $_GET['hmn_sms_test_token'] ) ? sanitize_key( wp_unslash( $_GET['hmn_sms_test_token'] ) ) : '';
+			$error_key = 'hmn_crm_sms_test_error_' . get_current_user_id() . '_' . $token;
+			$error_message = $token ? get_transient( $error_key ) : '';
+			if ( $token ) { delete_transient( $error_key ); }
+			if ( ! is_scalar( $error_message ) || '' === trim( (string) $error_message ) ) { $error_message = __( 'جزئیات خطا در گزارش خطای وردپرس ثبت شده است', 'hmn-crm' ); }
+			echo '<div class="notice notice-error is-dismissible"><p>' . esc_html( (string) $error_message ) . '</p></div>';
+		}
 		?><form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>"><input type="hidden" name="action" value="hmn_crm_sms_test" /><?php wp_nonce_field( 'hmn_crm_sms_test' ); ?><table class="form-table"><tr><th><label for="hmn-test-phone">شماره موبایل</label></th><td><input required type="text" class="regular-text" id="hmn-test-phone" name="phone" placeholder="09123456789" /></td></tr><tr><th><label for="hmn-test-body">Body ID الگو</label></th><td><input required type="number" min="1" class="small-text" id="hmn-test-body" name="body_id" /></td></tr><tr><th><label for="hmn-test-args">مقادیر متغیرها</label></th><td><input type="text" class="regular-text" id="hmn-test-args" name="args" placeholder="مثال: علی،۱۴۰۳/۰۱/۰۱" /><p class="description">مقادیر را با ویرگول انگلیسی جدا کنید.</p></td></tr></table><?php submit_button( 'ارسال پیامک آزمایشی' ); ?></form><?php
 	}
 
@@ -82,8 +89,15 @@ final class HMN_CRM_SMS_Settings {
 		$raw_args = isset( $_POST['args'] ) && is_scalar( $_POST['args'] ) ? sanitize_text_field( wp_unslash( $_POST['args'] ) ) : '';
 		$args = '' === $raw_args ? array() : array_map( 'trim', explode( ',', $raw_args ) );
 		$result = ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, $args );
-		$target = add_query_arg( array( 'page' => self::PAGE_SLUG, 'tab' => 'test', 'hmn_sms_test' => is_wp_error( $result ) ? 'error' : 'success' ), admin_url( 'admin.php' ) );
-		if ( is_wp_error( $result ) ) { error_log( 'HMN CRM SMS test: ' . $result->get_error_message() ); }
+		$redirect_args = array( 'page' => self::PAGE_SLUG, 'tab' => 'test', 'hmn_sms_test' => is_wp_error( $result ) ? 'error' : 'success' );
+		if ( is_wp_error( $result ) ) {
+			$error_message = sanitize_text_field( $result->get_error_message() );
+			error_log( 'HMN CRM SMS test failed: ' . $error_message );
+			$token = wp_generate_password( 32, false, false );
+			set_transient( 'hmn_crm_sms_test_error_' . get_current_user_id() . '_' . sanitize_key( $token ), $error_message, MINUTE_IN_SECONDS );
+			$redirect_args['hmn_sms_test_token'] = sanitize_key( $token );
+		}
+		$target = add_query_arg( $redirect_args, admin_url( 'admin.php' ) );
 		wp_safe_redirect( $target ); exit;
 	}
 }

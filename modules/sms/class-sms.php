@@ -67,7 +67,7 @@ class HMN_CRM_SMS {
 		);
 
 		if ( is_wp_error( $response ) ) {
-			return $response;
+			return new WP_Error( 'hmn_crm_sms_http_error', $this->mask_sensitive_data( $response->get_error_message() ), array( 'source' => 'transport' ) );
 		}
 
 		$status_code = wp_remote_retrieve_response_code( $response );
@@ -75,9 +75,35 @@ class HMN_CRM_SMS {
 		$decoded = json_decode( $response_body, true );
 
 		if ( $status_code < 200 || $status_code >= 300 ) {
-			return new WP_Error( 'hmn_crm_sms_api_error', __( 'خطا در سرویس پیامک.', 'hmn-crm' ), array( 'status' => $status_code, 'body' => $decoded ? $decoded : $response_body ) );
+			$api_message = $this->extract_api_error_message( $decoded, $response_body );
+			$message = sprintf( __( 'خطای سرویس پیامک (HTTP %1$d): %2$s', 'hmn-crm' ), $status_code, $api_message );
+			return new WP_Error( 'hmn_crm_sms_api_error', $this->mask_sensitive_data( $message ), array( 'status' => $status_code ) );
 		}
 
 		return is_array( $decoded ) ? $decoded : array( 'status' => $status_code, 'body' => $response_body );
+	}
+
+	/** Extract a useful, non-sensitive message from a JSON or text API response. */
+	private function extract_api_error_message( $decoded, $raw_body ) {
+		if ( is_array( $decoded ) ) {
+			foreach ( array( 'message', 'error', 'detail', 'description', 'Message', 'Error' ) as $key ) {
+				if ( isset( $decoded[ $key ] ) && is_scalar( $decoded[ $key ] ) && '' !== trim( (string) $decoded[ $key ] ) ) {
+					return sanitize_text_field( (string) $decoded[ $key ] );
+				}
+			}
+			$flattened = wp_json_encode( $decoded, JSON_UNESCAPED_UNICODE );
+			if ( $flattened ) { return sanitize_text_field( $flattened ); }
+		}
+		$raw_body = is_scalar( $raw_body ) ? trim( (string) $raw_body ) : '';
+		return '' !== $raw_body ? sanitize_text_field( $raw_body ) : __( 'پاسخ نامشخصی از سرویس دریافت شد.', 'hmn-crm' );
+	}
+
+	/** Remove the configured API key from any message before logging/displaying. */
+	private function mask_sensitive_data( $message ) {
+		$settings = get_option( 'hmn_crm_sms_settings', array() );
+		$key = isset( $settings['melipayamak_api_key'] ) ? $settings['melipayamak_api_key'] : ( isset( $settings['api_key'] ) ? $settings['api_key'] : '' );
+		$message = is_scalar( $message ) ? (string) $message : '';
+		if ( is_scalar( $key ) && '' !== (string) $key ) { $message = str_replace( (string) $key, '[MASKED_API_KEY]', $message ); }
+		return sanitize_text_field( $message );
 	}
 }

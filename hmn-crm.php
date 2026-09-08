@@ -2,7 +2,7 @@
 /*
 Plugin Name: HMN CRM
 Description: سیستم جامع مدیریت مشتریان و نوبت‌دهی
-Version: 1.0.0
+Version: 1.4.0
 Author: Houman
 */
 
