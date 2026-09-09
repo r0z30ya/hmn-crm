@@ -31,13 +31,28 @@ final class HMN_CRM_SMS_Settings {
 	/** Sanitize all persisted values. */
 	public function sanitize_settings( $input ) {
 		$input = is_array( $input ) ? $input : array();
-		$keys = array( 'melipayamak_api_key' );
-		$output = array();
-		foreach ( $keys as $key ) { $output[ $key ] = isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) ? sanitize_text_field( $input[ $key ] ) : ''; }
-		foreach ( array( 'melipayamak_otp_body_id', 'melipayamak_booking_body_id', 'melipayamak_booking_edit_body_id', 'melipayamak_booking_cancel_body_id', 'melipayamak_booking_reminder_body_id' ) as $key ) {
-			$output[ $key ] = isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) ? absint( $input[ $key ] ) : 0;
+		$current = get_option( self::OPTION_NAME, array() );
+		$current = is_array( $current ) ? $current : array();
+		$output  = $current;
+
+		if ( array_key_exists( 'melipayamak_api_key', $input ) && is_scalar( $input['melipayamak_api_key'] ) ) {
+			$output['melipayamak_api_key'] = sanitize_text_field( $input['melipayamak_api_key'] );
 		}
-		return $output;
+
+		$body_id_keys = array( 'melipayamak_otp_body_id', 'melipayamak_booking_body_id', 'melipayamak_booking_edit_body_id', 'melipayamak_booking_cancel_body_id', 'melipayamak_booking_reminder_body_id' );
+		foreach ( $body_id_keys as $key ) {
+			if ( ! array_key_exists( $key, $input ) || ! is_scalar( $input[ $key ] ) ) {
+				continue;
+			}
+
+			$value = trim( (string) $input[ $key ] );
+			// Empty fields from another tab preserve the stored value; explicit 0 clears it.
+			if ( '' !== $value ) {
+				$output[ $key ] = absint( $value );
+			}
+		}
+
+		return array_merge( $current, $output );
 	}
 
 	/** Render the RTL tabbed settings screen. */

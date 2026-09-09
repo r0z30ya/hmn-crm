@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: HMN CRM
-Description: سیستم جامع مدیریت مشتریان و نوبت‌دهی
-Version: 1.4.0
+Description: اتوماسیون نوبت‌دهی 
+Version: 1.5.0
 Author: Houman
 */
 
