@@ -32,6 +32,8 @@ final class HMN_CRM_Booking {
 		add_action( 'jet-engine/forms/handler/after-send', array( $this, 'send_booking_sms' ), 10, 2 );
 		// Can also be selected as a JetEngine “Call Hook” post-submit action.
 		add_action( 'hmn_crm_booking_post_submit', array( $this, 'send_booking_sms' ), 10, 2 );
+		add_action( 'wp_head', array( $this, 'print_custom_css' ) );
+		add_action( 'wp_footer', array( $this, 'print_frontend_script' ), 99 );
 	}
 
 	/** Process an AJAX request and send a five-digit OTP. */
@@ -51,14 +53,17 @@ final class HMN_CRM_Booking {
 		}
 
 		$code = (string) wp_rand( 10000, 99999 );
-		set_transient( $this->get_transient_key( $phone ), $code, self::OTP_TTL );
 		set_transient( 'hmn_crm_otp_rate_' . md5( $phone ), 1, MINUTE_IN_SECONDS );
 
 		$settings = get_option( 'hmn_crm_sms_settings', array() );
 		$body_value = isset( $settings['melipayamak_otp_body_id'] ) ? $settings['melipayamak_otp_body_id'] : ( isset( $settings['otp_body_id'] ) ? $settings['otp_body_id'] : 0 );
 		$body_id  = is_scalar( $body_value ) ? absint( $body_value ) : 0;
 		$sms      = new HMN_CRM_SMS();
-		$result   = $sms->send_pattern( $phone, $body_id, array( $code ) );
+		$result   = $sms->send_otp( $phone );
+		if ( ! is_wp_error( $result ) && isset( $result['code'] ) ) {
+			$code = sanitize_text_field( (string) $result['code'] );
+			set_transient( $this->get_transient_key( $phone ), $code, self::OTP_TTL );
+		}
 
 		if ( is_wp_error( $result ) ) {
 			delete_transient( $this->get_transient_key( $phone ) );
@@ -66,6 +71,33 @@ final class HMN_CRM_Booking {
 		}
 
 		wp_send_json_success( array( 'message' => __( 'کد تایید ارسال شد.', 'hmn-crm' ) ) );
+	}
+
+	/** Print administrator-provided booking CSS safely in the document head. */
+	public function print_custom_css() {
+		$settings = get_option( 'hmn_crm_sms_settings', array() );
+		$css = isset( $settings['custom_css'] ) && is_scalar( $settings['custom_css'] ) ? (string) $settings['custom_css'] : '';
+		if ( '' !== trim( $css ) ) { echo "\n<style id=\"hmn-crm-custom-css\">\n" . wp_strip_all_tags( $css ) . "\n</style>\n"; }
+	}
+
+	/** Add the OTP button and a lightweight Jalali date presentation layer. */
+	public function print_frontend_script() {
+		if ( is_admin() ) { return; }
+		$ajax_url = admin_url( 'admin-ajax.php' );
+		$nonce = wp_create_nonce( 'hmn_send_otp' );
+		?>
+		<script>
+		(function(){
+			var ajaxUrl=<?php echo wp_json_encode( $ajax_url ); ?>, nonce=<?php echo wp_json_encode( $nonce ); ?>;
+			function pad(n){return n<10?'0'+n:n;}
+			function insertButton(input){if(input.dataset.hmnOtpReady)return; input.dataset.hmnOtpReady='1'; var b=document.createElement('button'); b.type='button'; b.className='hmn-crm-send-otp button'; b.textContent='ارسال رمز یکبار مصرف'; input.parentNode.appendChild(b); b.addEventListener('click',function(){var phone=input.value.trim(); if(!/^09\d{9}$/.test(phone)){alert('شماره موبایل معتبر نیست.');return;} b.disabled=true; var body=new URLSearchParams({action:'hmn_send_otp',user_phone:phone,nonce:nonce}); fetch(ajaxUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},body:body}).then(function(r){return r.json();}).then(function(j){alert(j&&j.success?'کد تایید ارسال شد.':(j&&j.data&&j.data.message?'خطا: '+j.data.message:'ارسال OTP ناموفق بود.'));}).catch(function(){alert('اتصال به سرور برقرار نشد.');}).finally(function(){b.disabled=false;});});}
+			document.querySelectorAll('input[name="user_phone"],input[name*="[user_phone]"]').forEach(insertButton);
+			var observer=new MutationObserver(function(){document.querySelectorAll('input[name="user_phone"],input[name*="[user_phone]"]').forEach(insertButton);}); observer.observe(document.body,{childList:true,subtree:true});
+			/* Jalali display hook: keeps the underlying JetAppointments value intact. */
+			window.hmnCrmToJalali=function(g){var d=new Date(g),gy=d.getFullYear(),gm=d.getMonth()+1,gd=d.getDate(),gdm=[0,31,59,90,120,151,181,212,243,273,304,334],jy=gy>1600?979:0; gy-=gy>1600?1600:621; var gy2=gm>2?gy+1:gy,days=365*gy+Math.floor((gy2+3)/4)-Math.floor((gy2+99)/100)+Math.floor((gy2+399)/400)-80+gd+gdm[gm-1]; jy+=33*Math.floor(days/12053); days%=12053; jy+=4*Math.floor(days/1461); days%=1461; if(days>365){jy+=Math.floor((days-1)/365);days=(days-1)%365;} var jm=days<186?1+Math.floor(days/31):7+Math.floor((days-186)/30),jd=1+(days<186?days%31:(days-186)%30); return jy+'/'+pad(jm)+'/'+pad(jd);};
+		})();
+		</script>
+		<?php
 	}
 
 	/** Validate OTP values supplied by any JetEngine form containing the required fields. */

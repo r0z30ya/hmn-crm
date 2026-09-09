@@ -17,6 +17,8 @@ class HMN_CRM_SMS {
 
 	/** BaseServiceNumber endpoint (method 1). */
 	const METHOD_ONE_ENDPOINT = 'https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber';
+	/** SmartSMS endpoint (method 3). */
+	const SMART_ENDPOINT = 'https://rest.payamak-panel.com/api/SmartSMS/Send';
 
 	/**
 	 * Backward-compatible pattern sender; this is method 2.
@@ -28,6 +30,40 @@ class HMN_CRM_SMS {
 	 */
 	public function send_pattern( $to, $body_id, array $args ) {
 		return $this->send_method_two( $to, $body_id, $args );
+	}
+
+	/**
+	 * Legacy fallback sender. Preserves the historical SmartSMS contract.
+	 *
+	 * @param string $to Recipient number.
+	 * @param string $text Free text.
+	 * @param string $from Sender number.
+	 * @return array|WP_Error API result.
+	 */
+	public function send_sms_legacy( $to, $text, $from ) {
+		return $this->send_smart_sms( $to, $text, $from );
+	}
+
+	/** Send an OTP through the console API. */
+	public function send_otp( $mobile ) {
+		$settings = $this->get_settings();
+		$key      = $this->get_api_key( $settings );
+		$to       = $this->clean_phone( $mobile );
+		if ( empty( $key ) || ! preg_match( '/^09\d{9}$/', $to ) ) {
+			return new WP_Error( 'hmn_crm_otp_invalid_input', __( 'کلید API یا شماره موبایل معتبر نیست.', 'hmn-crm' ), array( 'status_code' => 0, 'raw_response' => '' ) );
+		}
+		$response = wp_remote_post( 'https://console.melipayamak.com/api/send/otp/' . rawurlencode( $key ), array( 'timeout' => 20, 'headers' => array( 'Content-Type' => 'application/json' ), 'body' => wp_json_encode( array( 'to' => $to ) ) ) );
+		if ( is_wp_error( $response ) ) {
+			return new WP_Error( 'hmn_crm_otp_connection_error', sprintf( __( 'اتصال به سرور برقرار نشد: %s', 'hmn-crm' ), sanitize_text_field( $response->get_error_message() ) ), array( 'status_code' => 0, 'raw_response' => '' ) );
+		}
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		$raw    = (string) wp_remote_retrieve_body( $response );
+		$json   = json_decode( $raw, true );
+		if ( is_array( $json ) && isset( $json['code'] ) && '' !== (string) $json['code'] ) {
+			return $json;
+		}
+		$message = ( 401 === $status || 403 === $status ) ? __( 'کلید API کنسول نامعتبر یا منقضی شده است.', 'hmn-crm' ) : ( is_array( $json ) && isset( $json['message'] ) ? sanitize_text_field( $json['message'] ) : __( 'ارسال OTP ناموفق بود.', 'hmn-crm' ) );
+		return new WP_Error( 'hmn_crm_otp_api_error', sprintf( '%s (HTTP %d، پاسخ: %s)', $message, $status, $this->safe_raw( $raw ) ), array( 'status_code' => $status, 'raw_response' => $raw ) );
 	}
 
 	/** Send with BaseServiceNumber (method 1). */
@@ -54,8 +90,19 @@ class HMN_CRM_SMS {
 		return $this->perform_request( self::API_ENDPOINT . rawurlencode( $api_key ), $payload, 'method_two' );
 	}
 
+	/** Send free-text SmartSMS (method 3). */
+	public function send_smart_sms( $to, $text, $from, $from_support_one = '', $from_support_two = '' ) {
+		$settings = $this->get_settings();
+		$payload = array( 'username' => $this->scalar_setting( $settings, 'melipayamak_smart_username', $this->scalar_setting( $settings, 'melipayamak_username' ) ), 'password' => $this->get_api_key( $settings ), 'to' => $this->clean_phone( $to ), 'text' => is_scalar( $text ) ? sanitize_textarea_field( wp_unslash( (string) $text ) ) : '', 'from' => $this->clean_phone( $from ) );
+		if ( is_scalar( $from_support_one ) && '' !== trim( (string) $from_support_one ) ) { $payload['fromSupportOne'] = $this->clean_phone( $from_support_one ); }
+		if ( is_scalar( $from_support_two ) && '' !== trim( (string) $from_support_two ) ) { $payload['fromSupportTwo'] = $this->clean_phone( $from_support_two ); }
+		if ( empty( $payload['username'] ) || empty( $payload['password'] ) || empty( $payload['to'] ) || empty( $payload['text'] ) || empty( $payload['from'] ) ) { return new WP_Error( 'hmn_crm_sms_smart_invalid_input', __( 'نام کاربری اسمارت، ApiKey، گیرنده، متن و شماره فرستنده الزامی است.', 'hmn-crm' ), array( 'payload' => $payload, 'status_code' => 0, 'raw_response' => '', 'method' => 'method_three' ) ); }
+		return $this->perform_smart_request( self::SMART_ENDPOINT, $payload );
+	}
+
 	/** Execute request and normalize response/error details. */
 	private function perform_request( $url, $payload, $method ) {
+		$code = 0;
 		if ( empty( $payload['to'] ) || empty( $payload['bodyId'] ) ) {
 			return new WP_Error( 'hmn_crm_sms_invalid_input', __( 'شماره گیرنده و شناسه الگو الزامی است.', 'hmn-crm' ), array( 'payload' => $payload, 'status_code' => 0, 'raw_response' => '' ) );
 		}
@@ -84,6 +131,21 @@ class HMN_CRM_SMS {
 		$message = sprintf( '%s (HTTP %d، پاسخ خام: %s)', $message, $status, $this->safe_raw( $raw ) );
 		return new WP_Error( 'hmn_crm_sms_api_error', $message, array( 'payload' => $payload, 'status_code' => $status, 'raw_response' => $raw, 'method' => $method, 'code' => $code ) );
 	}
+
+	/** Execute and normalize SmartSMS response. */
+	private function perform_smart_request( $url, $payload ) {
+		$response = wp_remote_post( $url, array( 'timeout' => 20, 'headers' => array( 'Content-Type' => 'application/json' ), 'body' => wp_json_encode( $payload ) ) );
+		if ( is_wp_error( $response ) ) { return new WP_Error( 'hmn_crm_sms_smart_connection_error', sprintf( __( 'اتصال به سرور برقرار نشد: %s', 'hmn-crm' ), sanitize_text_field( $response->get_error_message() ) ), array( 'payload' => $payload, 'status_code' => 0, 'raw_response' => '', 'method' => 'method_three' ) ); }
+		$status = (int) wp_remote_retrieve_response_code( $response ); $raw = (string) wp_remote_retrieve_body( $response ); $json = json_decode( $raw, true );
+		$success = is_array( $json ) && 1 === (int) ( isset( $json['RetStatus'] ) ? $json['RetStatus'] : 0 ) && ! empty( $json['Value'] );
+		if ( $success ) { return $json; }
+		if ( 401 === $status || 403 === $status ) { $message = 'apiKey نامعتبر یا منقضی شده است'; } elseif ( is_array( $json ) && isset( $json['Message'] ) && 'Username or password is not correct' === $json['Message'] ) { $message = 'نام کاربری اسمارت یا ApiKey اشتباه است'; } elseif ( ! is_array( $json ) ) { $message = 'پاسخ نامعتبر از سرور'; } else { $message = $this->smart_error_message( isset( $json['RetStatus'] ) ? $json['RetStatus'] : ( isset( $json['ReqStatus'] ) ? $json['ReqStatus'] : '' ) ); }
+		$message = sprintf( '%s (HTTP %d، کد خام: %s، پاسخ خام: %s)', $message, $status, is_array( $json ) && isset( $json['RetStatus'] ) ? (string) $json['RetStatus'] : '', $this->safe_raw( $raw ) );
+		return new WP_Error( 'hmn_crm_sms_smart_api_error', $message, array( 'payload' => $payload, 'status_code' => $status, 'raw_response' => $raw, 'method' => 'method_three' ) );
+	}
+
+	/** Translate SmartSMS status codes. */
+	private function smart_error_message( $code ) { $messages = array( 0 => 'نام کاربری یا ApiKey اشتباه است', -1 => 'نام کاربری یا ApiKey اشتباه است', 4 => 'حداکثر ۱۰۰ شماره در هر فراخوانی مجاز است', 5 => 'شماره فرستنده اصلی معتبر نیست', 7 => 'کلمه فیلترشده است؛ متن برای تأیید ارسال شد', 9 => 'ارسال از خطوط عمومی از طریق وب‌سرویس مجاز نیست', 14 => 'متن حاوی لینک است', 15 => 'کاراکتر لغو۱۱ در انتهای متن وجود ندارد' ); return isset( $messages[ (int) $code ] ) ? $messages[ (int) $code ] : sprintf( 'خطای اسمارت با کد %s', $code ); }
 
 	/** Map method-one raw status codes to Persian messages. */
 	private function method_one_message( $code ) {
