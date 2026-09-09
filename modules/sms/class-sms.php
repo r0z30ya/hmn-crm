@@ -1,6 +1,6 @@
 <?php
 /**
- * Pattern SMS service for Melipayamak REST API.
+ * Melipayamak REST SMS services.
  *
  * @package HMN_CRM
  */
@@ -9,101 +9,99 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-/**
- * Send pattern-based SMS messages.
- */
+/** Send pattern SMS using either supported Melipayamak REST contract. */
 class HMN_CRM_SMS {
 
-	/**
-	 * Melipayamak shared-pattern endpoint.
-	 *
-	 * @var string
-	 */
-	const API_ENDPOINT = 'https://api.melipayamak.com/api/send/shared/';
+	/** Shared API endpoint (method 2). */
+	const API_ENDPOINT = 'https://console.melipayamak.com/api/send/shared/';
+
+	/** BaseServiceNumber endpoint (method 1). */
+	const METHOD_ONE_ENDPOINT = 'https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber';
 
 	/**
-	 * Send a pattern SMS to a recipient.
+	 * Backward-compatible pattern sender; this is method 2.
 	 *
-	 * @param string       $to      Recipient mobile number.
-	 * @param int|string   $body_id Melipayamak pattern/body ID.
-	 * @param array        $args    Pattern values in API order, e.g. array( '54321' ).
-	 * @return array|WP_Error Decoded API response or a WordPress error.
+	 * @param string $to Recipient mobile number.
+	 * @param int    $body_id Pattern ID.
+	 * @param array  $args Ordered pattern values.
+	 * @return array|WP_Error
 	 */
 	public function send_pattern( $to, $body_id, array $args ) {
-		$to      = is_scalar( $to ) ? sanitize_text_field( wp_unslash( (string) $to ) ) : '';
-		$body_id = is_scalar( $body_id ) ? absint( $body_id ) : 0;
+		return $this->send_method_two( $to, $body_id, $args );
+	}
 
-		if ( empty( $to ) || empty( $body_id ) ) {
-			return new WP_Error( 'hmn_crm_sms_invalid_input', __( 'شماره گیرنده و شناسه الگو الزامی است.', 'hmn-crm' ) );
-		}
-
-		$settings = get_option( 'hmn_crm_sms_settings', array() );
-		$api_key_value = isset( $settings['melipayamak_api_key'] ) ? $settings['melipayamak_api_key'] : ( isset( $settings['api_key'] ) ? $settings['api_key'] : '' );
-		$api_key  = is_scalar( $api_key_value ) ? sanitize_text_field( $api_key_value ) : '';
-		if ( empty( $api_key ) ) {
-			return new WP_Error( 'hmn_crm_sms_missing_api_key', __( 'کلید API پیامک تنظیم نشده است.', 'hmn-crm' ) );
-		}
-
-		$items = array();
-		foreach ( (array) $args as $value ) {
-			if ( is_scalar( $value ) ) {
-				$items[] = sanitize_text_field( wp_unslash( (string) $value ) );
-			}
-		}
-
-		$payload = array(
-			'bodyId' => $body_id,
-			'to'     => $to,
-			'args'   => $items,
+	/** Send with BaseServiceNumber (method 1). */
+	public function send_method_one( $to, $body_id, array $args ) {
+		$settings = $this->get_settings();
+		$payload  = array(
+			'username' => $this->scalar_setting( $settings, 'melipayamak_username' ),
+			'password' => $this->scalar_setting( $settings, 'melipayamak_password', $this->get_api_key( $settings ) ),
+			'to'       => $this->clean_phone( $to ),
+			'text'     => $this->clean_args( $args, ';' ),
+			'bodyId'   => absint( $body_id ),
 		);
+		return $this->perform_request( self::METHOD_ONE_ENDPOINT, $payload, 'method_one' );
+	}
 
-		$response = wp_remote_post(
-			self::API_ENDPOINT . rawurlencode( $api_key ),
-			array(
-				'timeout' => 15,
-				'headers' => array( 'Content-Type' => 'application/json; charset=utf-8' ),
-				'body'    => wp_json_encode( $payload ),
-			)
-		);
+	/** Send with console shared endpoint (method 2). */
+	public function send_method_two( $to, $body_id, array $args ) {
+		$settings = $this->get_settings();
+		$api_key  = $this->get_api_key( $settings );
+		$payload  = array( 'bodyId' => absint( $body_id ), 'to' => $this->clean_phone( $to ), 'args' => $this->clean_args( $args ) );
+		if ( empty( $payload['to'] ) || empty( $payload['bodyId'] ) || empty( $payload['args'] ) || empty( $api_key ) ) {
+			return new WP_Error( 'hmn_crm_sms_invalid_input', __( 'شماره، Body ID، کلید API و حداقل یک متغیر الزامی است.', 'hmn-crm' ), array( 'payload' => $payload, 'status_code' => 0, 'raw_response' => '' ) );
+		}
+		return $this->perform_request( self::API_ENDPOINT . rawurlencode( $api_key ), $payload, 'method_two' );
+	}
 
+	/** Execute request and normalize response/error details. */
+	private function perform_request( $url, $payload, $method ) {
+		if ( empty( $payload['to'] ) || empty( $payload['bodyId'] ) ) {
+			return new WP_Error( 'hmn_crm_sms_invalid_input', __( 'شماره گیرنده و شناسه الگو الزامی است.', 'hmn-crm' ), array( 'payload' => $payload, 'status_code' => 0, 'raw_response' => '' ) );
+		}
+		$response = wp_remote_post( $url, array( 'timeout' => 20, 'headers' => array( 'Content-Type' => 'application/json; charset=utf-8' ), 'body' => wp_json_encode( $payload ) ) );
 		if ( is_wp_error( $response ) ) {
-			return new WP_Error( 'hmn_crm_sms_http_error', $this->mask_sensitive_data( $response->get_error_message() ), array( 'source' => 'transport' ) );
+			return new WP_Error( 'hmn_crm_sms_connection_error', sprintf( __( 'اتصال به سرور برقرار نشد: %s', 'hmn-crm' ), sanitize_text_field( $response->get_error_message() ) ), array( 'payload' => $payload, 'status_code' => 0, 'raw_response' => '', 'method' => $method ) );
 		}
-
-		$status_code = wp_remote_retrieve_response_code( $response );
-		$response_body = wp_remote_retrieve_body( $response );
-		$decoded = json_decode( $response_body, true );
-
-		if ( $status_code < 200 || $status_code >= 300 ) {
-			$api_message = $this->extract_api_error_message( $decoded, $response_body );
-			$message = sprintf( __( 'خطای سرویس پیامک (HTTP %1$d): %2$s', 'hmn-crm' ), $status_code, $api_message );
-			return new WP_Error( 'hmn_crm_sms_api_error', $this->mask_sensitive_data( $message ), array( 'status' => $status_code ) );
-		}
-
-		return is_array( $decoded ) ? $decoded : array( 'status' => $status_code, 'body' => $response_body );
-	}
-
-	/** Extract a useful, non-sensitive message from a JSON or text API response. */
-	private function extract_api_error_message( $decoded, $raw_body ) {
-		if ( is_array( $decoded ) ) {
-			foreach ( array( 'message', 'error', 'detail', 'description', 'Message', 'Error' ) as $key ) {
-				if ( isset( $decoded[ $key ] ) && is_scalar( $decoded[ $key ] ) && '' !== trim( (string) $decoded[ $key ] ) ) {
-					return sanitize_text_field( (string) $decoded[ $key ] );
-				}
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		$raw    = (string) wp_remote_retrieve_body( $response );
+		$json   = json_decode( $raw, true );
+		if ( 'method_one' === $method ) {
+			$code = $this->method_one_code( $json, $raw );
+			$value = is_array( $json ) && isset( $json['Value'] ) ? (string) $json['Value'] : '';
+			if ( 1 === (int) ( is_array( $json ) && isset( $json['RetStatus'] ) ? $json['RetStatus'] : 0 ) && strlen( $value ) > 15 ) {
+				return is_array( $json ) ? $json : array( 'Value' => $value );
 			}
-			$flattened = wp_json_encode( $decoded, JSON_UNESCAPED_UNICODE );
-			if ( $flattened ) { return sanitize_text_field( $flattened ); }
+			$message = $this->method_one_message( $code );
+		} else {
+			if ( 401 === $status || 403 === $status ) { $message = __( 'apiKey نامعتبر یا منقضی شده است', 'hmn-crm' ); }
+			elseif ( 400 === $status ) { $message = __( 'درخواست نامعتبر — bodyId یا متغیرهای الگو را بررسی کنید', 'hmn-crm' ); }
+			elseif ( 429 === $status ) { $message = __( 'تعداد درخواست‌ها بیش از حد مجاز — کمی بعد تلاش کنید', 'hmn-crm' ); }
+			elseif ( ! is_array( $json ) ) { $message = __( 'پاسخ نامعتبر از سرور', 'hmn-crm' ); }
+			elseif ( ! isset( $json['recId'] ) ) { $message = __( 'ارسال ناموفق — recId دریافت نشد', 'hmn-crm' ); }
+			else { $message = __( 'ارسال ناموفق', 'hmn-crm' ); }
 		}
-		$raw_body = is_scalar( $raw_body ) ? trim( (string) $raw_body ) : '';
-		return '' !== $raw_body ? sanitize_text_field( $raw_body ) : __( 'پاسخ نامشخصی از سرویس دریافت شد.', 'hmn-crm' );
+		$message = sprintf( '%s (HTTP %d، پاسخ خام: %s)', $message, $status, $this->safe_raw( $raw ) );
+		return new WP_Error( 'hmn_crm_sms_api_error', $message, array( 'payload' => $payload, 'status_code' => $status, 'raw_response' => $raw, 'method' => $method, 'code' => $code ) );
 	}
 
-	/** Remove the configured API key from any message before logging/displaying. */
-	private function mask_sensitive_data( $message ) {
-		$settings = get_option( 'hmn_crm_sms_settings', array() );
-		$key = isset( $settings['melipayamak_api_key'] ) ? $settings['melipayamak_api_key'] : ( isset( $settings['api_key'] ) ? $settings['api_key'] : '' );
-		$message = is_scalar( $message ) ? (string) $message : '';
-		if ( is_scalar( $key ) && '' !== (string) $key ) { $message = str_replace( (string) $key, '[MASKED_API_KEY]', $message ); }
-		return sanitize_text_field( $message );
+	/** Map method-one raw status codes to Persian messages. */
+	private function method_one_message( $code ) {
+		$messages = array( 110 => 'احراز هویت ناموفق: به‌جای رمز عبور باید ApiKey وارد شود (تنظیمات توسعه‌دهندگان پنل)', -110 => 'احراز هویت ناموفق: به‌جای رمز عبور باید ApiKey وارد شود (تنظیمات توسعه‌دهندگان پنل)', 109 => 'IP سرور در پنل مجاز نشده است — در تنظیمات وب‌سرویس پنل، IP مجاز تعریف کنید', -109 => 'IP سرور در پنل مجاز نشده است — در تنظیمات وب‌سرویس پنل، IP مجاز تعریف کنید', 108 => 'IP سرور به دلیل تلاش‌های ناموفق مسدود شده — از پنل رفع مسدودی کنید', -108 => 'IP سرور به دلیل تلاش‌های ناموفق مسدود شده — از پنل رفع مسدودی کنید', -1 => 'دسترسی وب‌سرویس در پنل غیرفعال است', 0 => 'نام کاربری یا رمز عبور اشتباه است', 2 => 'موجودی حساب کافی نیست', 6 => 'سیستم در حال بروزرسانی است، بعداً تلاش کنید', 7 => 'متن پیامک حاوی کلمه فیلترشده است — با واحد پنل تماس بگیرید', 10 => 'کاربر فعال نیست', 11 => 'پیامک ارسال نشد', 12 => 'مدارک کاربر تکمیل نیست', 18 => 'شماره موبایل گیرنده نامعتبر است', 19 => 'سقف ارسال روزانه وب‌سرویس پر شده است', -2 => 'در هر درخواست فقط یک شماره مجاز است', -3 => 'خط ارسال‌کننده تعریف نشده است', -4 => 'Body ID نامعتبر است یا الگو هنوز تأیید نشده', -5 => 'متن ارسالی با متغیرهای الگو مطابقت ندارد (تعداد/ترتیب متغیرها را چک کنید)', -6 => 'خطای داخلی سرور — با پشتیبانی تماس بگیرید', -7 => 'شماره فرستنده یافت نشد', -10 => 'ارسال لینک در متغیرها مجاز نیست' );
+		return isset( $messages[ $code ] ) ? $messages[ $code ] : sprintf( 'خطای ناشناخته با کد %s', $code );
 	}
+
+	/** Get method-one code from Value/RetStatus. */
+	private function method_one_code( $json, $raw ) {
+		if ( is_array( $json ) && isset( $json['Value'] ) && is_scalar( $json['Value'] ) && preg_match( '/^-?\d+$/', trim( (string) $json['Value'] ) ) ) {
+			return (int) $json['Value'];
+		}
+		return is_array( $json ) && isset( $json['RetStatus'] ) ? (int) $json['RetStatus'] : (int) trim( (string) $raw );
+	}
+	private function get_settings() { $settings = get_option( 'hmn_crm_sms_settings', array() ); return is_array( $settings ) ? $settings : array(); }
+	private function get_api_key( $settings ) { return $this->scalar_setting( $settings, 'melipayamak_api_key', $this->scalar_setting( $settings, 'api_key' ) ); }
+	private function scalar_setting( $settings, $key, $default = '' ) { return isset( $settings[ $key ] ) && is_scalar( $settings[ $key ] ) ? sanitize_text_field( $settings[ $key ] ) : $default; }
+	private function clean_phone( $phone ) { return is_scalar( $phone ) ? sanitize_text_field( wp_unslash( (string) $phone ) ) : ''; }
+	private function clean_args( $args, $separator = null ) { $values = array(); foreach ( $args as $value ) { if ( is_scalar( $value ) && '' !== trim( (string) $value ) ) { $values[] = sanitize_text_field( wp_unslash( (string) $value ) ); } } return null === $separator ? $values : implode( $separator, $values ); }
+	private function safe_raw( $raw ) { return sanitize_text_field( preg_replace( '/[\r\n\t]+/', ' ', (string) $raw ) ); }
 }
