@@ -34,6 +34,9 @@ final class HMN_CRM_Core {
 	private function __construct() {
 		$this->load_modules();
 		add_action( 'admin_menu', array( $this, 'register_admin_menu' ) );
+		add_action( 'init', array( $this, 'register_routes' ) );
+		add_filter( 'query_vars', array( $this, 'register_query_var' ) );
+		add_action( 'template_redirect', array( $this, 'render_portal' ) );
 	}
 
 	/** Register the HMN CRM top-level menu and module submenus. */
@@ -42,10 +45,50 @@ final class HMN_CRM_Core {
 			return;
 		}
 
-		add_menu_page( 'HMN CRM', 'HMN CRM', 'manage_options', 'hmn-crm', array( $this, 'render_dashboard' ), 'dashicons-calendar-alt', 30 );
+		add_menu_page( 'HMN CRM', 'HMN CRM', 'manage_options', 'hmn-crm', array( $this, 'redirect_to_portal' ), 'dashicons-calendar-alt', 30 );
 		if ( class_exists( 'HMN_CRM_SMS_Settings' ) ) {
 			add_submenu_page( 'hmn-crm', 'تنظیمات پیامک', 'تنظیمات پیامک', 'manage_options', 'hmn-crm-sms', array( 'HMN_CRM_SMS_Settings', 'render_page' ) );
 		}
+	}
+
+	/** Register the staff portal URL. */
+	public function register_routes() {
+		add_rewrite_rule( '^hcrm/?$', 'index.php?hmn_crm_portal=1', 'top' );
+		if ( '2.0.0' !== get_option( 'hmn_crm_rewrite_version' ) ) {
+			flush_rewrite_rules( false );
+			update_option( 'hmn_crm_rewrite_version', '2.0.0', false );
+		}
+	}
+
+	/** Allow the internal portal query variable. */
+	public function register_query_var( $vars ) {
+		$vars[] = 'hmn_crm_portal';
+		return $vars;
+	}
+
+	/** Render the portal outside the theme when /hcrm is requested. */
+	public function render_portal() {
+		if ( ! get_query_var( 'hmn_crm_portal' ) ) {
+			return;
+		}
+		if ( ! is_user_logged_in() ) {
+			wp_safe_redirect( wp_login_url( home_url( '/hcrm/' ) ) );
+			exit;
+		}
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'شما به پنل مدیریت نوبت‌ها دسترسی ندارید.', 'hmn-crm' ), 403 );
+		}
+		if ( class_exists( 'HMN_CRM_Dashboard' ) ) {
+			HMN_CRM_Dashboard::render_portal();
+			exit;
+		}
+		wp_die( esc_html__( 'ماژول پنل نوبت‌ها بارگذاری نشد.', 'hmn-crm' ), 500 );
+	}
+
+	/** Open the custom staff portal from the WordPress menu. */
+	public function redirect_to_portal() {
+		wp_safe_redirect( home_url( '/hcrm/' ) );
+		exit;
 	}
 
 	/** Render the top-level dashboard placeholder. */
