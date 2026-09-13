@@ -24,7 +24,7 @@ final class HMN_CRM_SMS_Settings {
 	/** Merge current values and sanitize submitted fields. */
 	public function sanitize_settings( $input ) {
 		$input = is_array( $input ) ? $input : array(); $current = get_option( self::OPTION_NAME, array() ); $current = is_array( $current ) ? $current : array(); $output = $current;
-		foreach ( array( 'melipayamak_api_key', 'melipayamak_sender', 'melipayamak_username', 'melipayamak_password', 'melipayamak_smart_username', 'melipayamak_smart_from', 'custom_css' ) as $key ) { if ( array_key_exists( $key, $input ) && is_scalar( $input[ $key ] ) ) { $output[ $key ] = 'custom_css' === $key ? wp_strip_all_tags( (string) $input[ $key ] ) : sanitize_text_field( $input[ $key ] ); } }
+		foreach ( array( 'melipayamak_api_key', 'melipayamak_sender', 'custom_css' ) as $key ) { if ( array_key_exists( $key, $input ) && is_scalar( $input[ $key ] ) ) { $output[ $key ] = 'custom_css' === $key ? wp_strip_all_tags( (string) $input[ $key ] ) : sanitize_text_field( $input[ $key ] ); } }
 		foreach ( array( 'melipayamak_otp_body_id', 'melipayamak_booking_body_id', 'melipayamak_booking_edit_body_id', 'melipayamak_booking_cancel_body_id', 'melipayamak_booking_reminder_body_id' ) as $key ) { if ( array_key_exists( $key, $input ) && is_scalar( $input[ $key ] ) && '' !== trim( (string) $input[ $key ] ) ) { $output[ $key ] = absint( $input[ $key ] ); } }
 		return array_merge( $current, $output );
 	}
