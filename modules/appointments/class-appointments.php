@@ -37,6 +37,7 @@ final class HMN_CRM_Appointments implements HMN_CRM_Module_Interface {
 		}
 		$slots = HMN_CRM_EasyAppointments::request( 'GET', 'availabilities', null, array( 'serviceId' => $service, 'providerId' => $provider, 'date' => $date ) );
 		if ( is_wp_error( $slots ) ) { $this->error( $slots ); }
+		if ( class_exists( 'HMN_CRM_Scheduling' ) ) { $slots = HMN_CRM_Scheduling::filter_slots( $slots, $date, $service, $provider ); }
 		if ( ! in_array( $time, $slots, true ) ) { wp_send_json_error( array( 'message' => 'این ساعت دیگر آزاد نیست.' ), 409 ); }
 		$customer = class_exists( 'HMN_CRM_Customers' ) ? HMN_CRM_Customers::find_by_phone( $phone ) : null;
 		if ( is_wp_error( $customer ) ) { $this->error( $customer ); }
