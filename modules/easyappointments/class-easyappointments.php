@@ -15,6 +15,7 @@ final class HMN_CRM_EasyAppointments {
 		add_action( 'wp_ajax_hmn_ea_verify_otp', array( $this, 'verify_otp_ajax' ) );
 		add_action( 'wp_ajax_nopriv_hmn_ea_verify_otp', array( $this, 'verify_otp_ajax' ) );
 		add_action( 'wp_ajax_hmn_ea_operator_book', array( $this, 'operator_book_ajax' ) );
+		add_action( 'wp_ajax_hmn_ea_operator_customer', array( $this, 'operator_customer_ajax' ) );
 		add_shortcode( 'hmn_booking_form', array( $this, 'render_shortcode' ) );
 	}
 
@@ -65,6 +66,22 @@ final class HMN_CRM_EasyAppointments {
 			wp_send_json_error( array( 'message' => 'کد تأیید اشتباه است یا منقضی شده است.' ), 403 );
 		}
 		wp_send_json_success();
+	}
+
+	/** Create an appointment from the protected operator panel, without OTP. */
+	public function operator_customer_ajax() {
+		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); }
+		$phone = preg_replace( '/\D+/', '', sanitize_text_field( wp_unslash( $_POST['operator_phone'] ?? '' ) ) );
+		if ( ! preg_match( '/^09\d{9}$/', $phone ) ) { wp_send_json_error( array( 'message' => 'شماره تلفن معتبر نیست.' ), 400 ); }
+		$customers = self::request( 'GET', 'customers', null, array( 'q' => $phone, 'length' => 100 ) );
+		if ( is_wp_error( $customers ) ) { $this->error( $customers ); }
+		foreach ( $customers as $customer ) {
+			$customer_phone = $customer['phone'] ?? ( $customer['phone_number'] ?? '' );
+			if ( $phone === preg_replace( '/\D+/', '', (string) $customer_phone ) ) {
+				wp_send_json_success( array( 'found' => true, 'first_name' => sanitize_text_field( $customer['firstName'] ?? ( $customer['first_name'] ?? '' ) ), 'last_name' => sanitize_text_field( $customer['lastName'] ?? ( $customer['last_name'] ?? '' ) ) ) );
+			}
+		}
+		wp_send_json_success( array( 'found' => false ) );
 	}
 
 	/** Create an appointment from the protected operator panel, without OTP. */
