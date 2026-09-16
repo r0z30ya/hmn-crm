@@ -22,6 +22,7 @@ final class HMN_CRM_Dashboard {
 		$user = wp_get_current_user();
 		$base = home_url( '/hcrm/' );
 		if ( isset( $_GET['section'] ) && 'customers' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Customers' ) ) { HMN_CRM_Customers::render_portal( $base, $user ); return; }
+		if ( isset( $_GET['section'] ) && 'scheduling' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Scheduling' ) ) { HMN_CRM_Scheduling::render_portal( $base, $user ); return; }
 		?>
 <!doctype html>
 <html <?php language_attributes(); ?> dir="rtl">
@@ -49,7 +50,7 @@ final class HMN_CRM_Dashboard {
 	</aside>
 	<main class="hmn-main">
 		<?php self::render_operator_form( $date ); ?>
-		<header class="hmn-topbar"><button class="hmn-menu" type="button" aria-controls="hmn-sidebar" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مرکز درمانی</p><h1>نوبت‌ها</h1></div><div class="hmn-topbar-actions"><button type="button" class="hmn-new-booking">+ ثبت نوبت جدید</button><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'date' => wp_date( 'Y-m-d' ), 'view' => 'daily' ), $base ) ); ?>">امروز</a><button type="button" class="hmn-toolbar-icon hmn-settings-placeholder" aria-label="تنظیمات" title="تنظیمات"><span aria-hidden="true">⚙</span></button><button type="button" class="hmn-toolbar-icon hmn-theme-toggle" aria-label="فعال‌سازی حالت تیره" title="تغییر حالت روشن و تیره"><span class="hmn-theme-sun" aria-hidden="true">☀</span><span class="hmn-theme-moon" aria-hidden="true">☾</span></button></div></header>
+		<header class="hmn-topbar"><button class="hmn-menu" type="button" aria-controls="hmn-sidebar" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مرکز درمانی</p><h1>نوبت‌ها</h1></div><div class="hmn-topbar-actions"><button type="button" class="hmn-new-booking">+ ثبت نوبت جدید</button><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'date' => wp_date( 'Y-m-d' ), 'view' => 'daily' ), $base ) ); ?>">امروز</a><a class="hmn-toolbar-icon" href="<?php echo esc_url( add_query_arg( 'section', 'scheduling', $base ) ); ?>" aria-label="تنظیمات نوبت‌دهی" title="تنظیمات نوبت‌دهی"><span aria-hidden="true">⚙</span></a><button type="button" class="hmn-toolbar-icon hmn-theme-toggle" aria-label="فعال‌سازی حالت تیره" title="تغییر حالت روشن و تیره"><span class="hmn-theme-sun" aria-hidden="true">☀</span><span class="hmn-theme-moon" aria-hidden="true">☾</span></button></div></header>
 		<section class="hmn-summary">
 			<div><span>نوبت‌های نمایش داده‌شده</span><strong><?php echo esc_html( count( $appointments ) ); ?></strong></div>
 			<div><span>تاریخ انتخاب‌شده</span><strong><?php echo esc_html( self::jalali_date( $date ) ); ?></strong></div>
