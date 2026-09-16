@@ -2,7 +2,7 @@
 /*
 Plugin Name: HMN CRM
 Description: اتوماسیون نوبت‌دهی 
-Version: 3.7.1
+Version: 3.8.0
 Author: Houman
 */
 
