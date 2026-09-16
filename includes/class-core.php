@@ -57,9 +57,9 @@ final class HMN_CRM_Core {
 	/** Register the staff portal URL. */
 	public function register_routes() {
 		add_rewrite_rule( '^hcrm/?$', 'index.php?hmn_crm_portal=1', 'top' );
-		if ( '2.0.0' !== get_option( 'hmn_crm_rewrite_version' ) ) {
+		if ( '2.1.0' !== get_option( 'hmn_crm_rewrite_version' ) ) {
 			flush_rewrite_rules( false );
-			update_option( 'hmn_crm_rewrite_version', '2.0.0', false );
+			update_option( 'hmn_crm_rewrite_version', '2.1.0', false );
 		}
 	}
 
@@ -90,7 +90,9 @@ final class HMN_CRM_Core {
 
 	/** Open the custom staff portal from the WordPress menu. */
 	public function redirect_to_portal() {
-		wp_safe_redirect( home_url( '/hcrm/' ) );
+		// Query-var fallback keeps the portal accessible even when a host caches
+		// or ignores WordPress rewrite rules for /hcrm/.
+		wp_safe_redirect( add_query_arg( 'hmn_crm_portal', '1', home_url( '/' ) ) );
 		exit;
 	}
 
