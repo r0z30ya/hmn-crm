@@ -30,7 +30,9 @@ final class HMN_CRM_Dashboard {
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<title><?php echo esc_html__( 'پنل مدیریت نوبت‌ها', 'hmn-crm' ); ?></title>
 	<?php wp_head(); ?>
-	<style><?php self::portal_styles(); ?></style>
+	<style><?php self::portal_styles(); ?>
+	.hmn-topbar-actions{display:flex;align-items:center;gap:9px}.hmn-new-booking{background:var(--brand);color:#fff;border:1px solid var(--brand);padding:10px 15px;border-radius:9px;font:inherit;font-weight:700;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,.08)}.hmn-new-booking:hover{background:var(--brand-dark);border-color:var(--brand-dark)}.hmn-toolbar-icon{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font-size:19px;cursor:pointer}.hmn-toolbar-icon:hover{background:var(--soft);border-color:#c9c3ff;color:var(--brand)}.hmn-theme-moon{display:none}.hmn-operator>.hmn-new-booking{display:none}.hmn-dark{--ink:#f2f4f7;--muted:#aeb9cc;--surface:#1d2436;--canvas:#111625;--line:#303b54;--soft:#2a3150;--brand:#8b7cff;--brand-dark:#a79cff}.hmn-dark .hmn-sidebar{background:#0d1220}.hmn-dark .hmn-user{background:#1a2237}.hmn-dark .hmn-tabs{background:#283147}.hmn-dark .hmn-tabs .is-active,.hmn-dark th{background:#222b40;color:var(--ink)}.hmn-dark .hmn-day-box,.hmn-dark .hmn-ea-form input,.hmn-dark .hmn-ea-form select{background:#1d2436;color:var(--ink)}.hmn-dark .hmn-toolbar-icon{background:#1d2436;color:#f2f4f7}.hmn-dark .hmn-theme-sun{display:none}.hmn-dark .hmn-theme-moon{display:block}.hmn-dark .hmn-operator-panel{background:rgba(5,9,19,.72)}@media(max-width:640px){.hmn-topbar{flex-wrap:wrap;gap:14px}.hmn-topbar>div:not(.hmn-topbar-actions){flex:1}.hmn-topbar-actions{width:100%;display:grid;grid-template-columns:1fr 1fr 42px 42px;gap:8px}.hmn-new-booking,.hmn-today{display:grid;place-items:center;min-height:42px;padding:8px}.hmn-toolbar-icon{width:42px;height:42px}}
+	</style>
 </head>
 <body class="hmn-portal-body">
 <div class="hmn-portal" data-view="<?php echo esc_attr( $view ); ?>">
@@ -46,7 +48,7 @@ final class HMN_CRM_Dashboard {
 	</aside>
 	<main class="hmn-main">
 		<?php self::render_operator_form( $date ); ?>
-		<header class="hmn-topbar"><button class="hmn-menu" type="button" aria-controls="hmn-sidebar" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مرکز درمانی</p><h1>نوبت‌ها</h1></div><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'date' => wp_date( 'Y-m-d' ), 'view' => 'daily' ), $base ) ); ?>">امروز</a></header>
+		<header class="hmn-topbar"><button class="hmn-menu" type="button" aria-controls="hmn-sidebar" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مرکز درمانی</p><h1>نوبت‌ها</h1></div><div class="hmn-topbar-actions"><button type="button" class="hmn-new-booking">+ ثبت نوبت جدید</button><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'date' => wp_date( 'Y-m-d' ), 'view' => 'daily' ), $base ) ); ?>">امروز</a><button type="button" class="hmn-toolbar-icon hmn-settings-placeholder" aria-label="تنظیمات" title="تنظیمات"><span aria-hidden="true">⚙</span></button><button type="button" class="hmn-toolbar-icon hmn-theme-toggle" aria-label="فعال‌سازی حالت تیره" title="تغییر حالت روشن و تیره"><span class="hmn-theme-sun" aria-hidden="true">☀</span><span class="hmn-theme-moon" aria-hidden="true">☾</span></button></div></header>
 		<section class="hmn-summary">
 			<div><span>نوبت‌های نمایش داده‌شده</span><strong><?php echo esc_html( count( $appointments ) ); ?></strong></div>
 			<div><span>تاریخ انتخاب‌شده</span><strong><?php echo esc_html( self::jalali_date( $date ) ); ?></strong></div>
@@ -61,7 +63,7 @@ final class HMN_CRM_Dashboard {
 		</section>
 	</main>
 </div>
-<script>document.querySelector('.hmn-menu').addEventListener('click',function(){document.querySelector('.hmn-portal').classList.toggle('menu-open');});</script>
+<script>(function(){var portal=document.querySelector('.hmn-portal'),menu=document.querySelector('.hmn-menu'),toggle=document.querySelector('.hmn-theme-toggle'),settings=document.querySelector('.hmn-settings-placeholder'),book=document.querySelector('.hmn-topbar .hmn-new-booking'),panel=document.querySelector('.hmn-operator-panel'),saved=localStorage.getItem('hmn-crm-theme');if(saved==='dark')document.body.classList.add('hmn-dark');if(menu)menu.addEventListener('click',function(){portal.classList.toggle('menu-open')});if(book&&panel)book.addEventListener('click',function(){panel.hidden=false});if(toggle)toggle.addEventListener('click',function(){document.body.classList.toggle('hmn-dark');var dark=document.body.classList.contains('hmn-dark');localStorage.setItem('hmn-crm-theme',dark?'dark':'light');toggle.setAttribute('aria-label',dark?'فعال‌سازی حالت روشن':'فعال‌سازی حالت تیره')});if(settings)settings.addEventListener('click',function(){settings.blur()})})();</script>
 <?php wp_footer(); ?>
 </body></html>
 		<?php if ( false ) : ?>

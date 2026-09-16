@@ -2,7 +2,7 @@
 /*
 Plugin Name: HMN CRM
 Description: پنل مشتری مداری هومانا با قابلیت رزرو نوبت
-Version: 4.4
+Version: 4.5
 Author: Houman
 */
 
