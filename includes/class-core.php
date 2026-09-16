@@ -46,6 +46,9 @@ final class HMN_CRM_Core {
 		}
 
 		add_menu_page( 'HMN CRM', 'HMN CRM', 'manage_options', 'hmn-crm', array( $this, 'redirect_to_portal' ), 'dashicons-calendar-alt', 30 );
+		if ( class_exists( 'HMN_CRM_EasyAppointments_Settings' ) ) {
+			add_submenu_page( 'hmn-crm', 'موتور نوبت‌دهی', 'موتور نوبت‌دهی', 'manage_options', 'hmn-crm-easyappointments', array( 'HMN_CRM_EasyAppointments_Settings', 'render_page' ) );
+		}
 		if ( class_exists( 'HMN_CRM_SMS_Settings' ) ) {
 			add_submenu_page( 'hmn-crm', 'تنظیمات پیامک', 'تنظیمات پیامک', 'manage_options', 'hmn-crm-sms', array( 'HMN_CRM_SMS_Settings', 'render_page' ) );
 		}

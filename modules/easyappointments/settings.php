@@ -1,0 +1,13 @@
+<?php
+/** Easy!Appointments connection settings. */
+if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+final class HMN_CRM_EasyAppointments_Settings {
+	public function __construct() { add_action( 'admin_init', array( $this, 'register' ) ); }
+	public function register() { register_setting( 'hmn_crm_ea_group', HMN_CRM_EasyAppointments::OPTION_NAME, array( 'type' => 'array', 'sanitize_callback' => array( $this, 'sanitize' ), 'default' => array() ) ); }
+	public function sanitize( $input ) { $input = is_array( $input ) ? $input : array(); return array( 'base_url' => esc_url_raw( untrailingslashit( $input['base_url'] ?? '' ) ), 'api_key' => sanitize_text_field( $input['api_key'] ?? '' ), 'hide_provider' => empty( $input['hide_provider'] ) ? 0 : 1, 'default_provider_id' => absint( $input['default_provider_id'] ?? 0 ) ); }
+	public static function render_page() { if ( ! current_user_can( 'manage_options' ) ) { return; } $s = HMN_CRM_EasyAppointments::settings(); ?>
+<div class="wrap" dir="rtl"><h1>موتور نوبت‌دهی Easy!Appointments</h1><p>Easy!Appointments را جداگانه روی دامنه یا زیردامنهٔ امن نصب کنید، سپس در تنظیمات خود آن یک API key بسازید.</p><form method="post" action="options.php"><?php settings_fields( 'hmn_crm_ea_group' ); ?><table class="form-table"><tr><th>آدرس نصب</th><td><input required type="url" class="regular-text code" name="<?php echo esc_attr( HMN_CRM_EasyAppointments::OPTION_NAME ); ?>[base_url]" value="<?php echo esc_attr( $s['base_url'] ?? '' ); ?>" placeholder="https://appointments.example.com"><p class="description">آدرس اصلی Easy!Appointments؛ بدون /index.php/api/v1</p></td></tr><tr><th>API Key</th><td><input required type="password" class="regular-text" name="<?php echo esc_attr( HMN_CRM_EasyAppointments::OPTION_NAME ); ?>[api_key]" value="<?php echo esc_attr( $s['api_key'] ?? '' ); ?>" autocomplete="new-password"></td></tr><tr><th>نمایش پزشک در فرم</th><td><label><input type="checkbox" name="<?php echo esc_attr( HMN_CRM_EasyAppointments::OPTION_NAME ); ?>[hide_provider]" value="1" <?php checked( ! empty( $s['hide_provider'] ) ); ?>> برای مجموعهٔ تک‌پزشکی مخفی شود</label></td></tr><tr><th>پزشک پیش‌فرض</th><td><input type="number" min="1" name="<?php echo esc_attr( HMN_CRM_EasyAppointments::OPTION_NAME ); ?>[default_provider_id]" value="<?php echo esc_attr( $s['default_provider_id'] ?? '' ); ?>"><p class="description">شناسهٔ Provider در Easy!Appointments؛ وقتی فیلد پزشک مخفی است الزامی است.</p></td></tr><tr><th>فرم سایت</th><td><code>[hmn_booking_form]</code><p class="description">این shortcode را در برگهٔ نوبت‌دهی قرار دهید.</p></td></tr></table><?php submit_button( 'ذخیرهٔ اتصال' ); ?></form></div>
+<?php }
+}
+new HMN_CRM_EasyAppointments_Settings();

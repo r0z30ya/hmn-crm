@@ -64,8 +64,15 @@ final class HMN_CRM_Dashboard {
 		<?php
 	}
 
-	/** Get appointments from the standard JetAppointments table when present. */
+	/** Get appointments from Easy!Appointments, with a JetAppointments fallback. */
 	private static function get_appointments( $date, $view ) {
+		$from = $date; $to = $date;
+		if ( 'weekly' === $view ) { $from = wp_date( 'Y-m-d', strtotime( 'saturday this week', strtotime( $date ) ) ); $to = wp_date( 'Y-m-d', strtotime( $from . ' +6 days' ) ); }
+		if ( 'monthly' === $view ) { $from = wp_date( 'Y-m-01', strtotime( $date ) ); $to = wp_date( 'Y-m-t', strtotime( $date ) ); }
+		if ( class_exists( 'HMN_CRM_EasyAppointments' ) && HMN_CRM_EasyAppointments::configured() ) {
+			$remote = HMN_CRM_EasyAppointments::appointments( $from, $to );
+			if ( is_array( $remote ) ) { return $remote; }
+		}
 		global $wpdb;
 		$table = $wpdb->prefix . 'jet_appointments';
 		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
@@ -74,9 +81,6 @@ final class HMN_CRM_Dashboard {
 		$columns = $wpdb->get_col( "DESCRIBE {$table}", 0 ); // Table name is WordPress-prefix derived.
 		$date_column = in_array( 'appointment_date', $columns, true ) ? 'appointment_date' : ( in_array( 'date', $columns, true ) ? 'date' : '' );
 		if ( ! $date_column ) { return array(); }
-		$from = $date; $to = $date;
-		if ( 'weekly' === $view ) { $from = wp_date( 'Y-m-d', strtotime( 'saturday this week', strtotime( $date ) ) ); $to = wp_date( 'Y-m-d', strtotime( $from . ' +6 days' ) ); }
-		if ( 'monthly' === $view ) { $from = wp_date( 'Y-m-01', strtotime( $date ) ); $to = wp_date( 'Y-m-t', strtotime( $date ) ); }
 		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE {$date_column} BETWEEN %s AND %s ORDER BY {$date_column} ASC", $from, $to ), ARRAY_A );
 		return is_array( $rows ) ? $rows : array();
 	}

@@ -43,7 +43,8 @@ final class HMN_CRM_Booking {
 		$phone = isset( $_POST['user_phone'] ) && is_scalar( $_POST['user_phone'] )
 			? sanitize_text_field( wp_unslash( $_POST['user_phone'] ) ) : '';
 
-		if ( isset( $_POST['nonce'] ) && ( ! is_scalar( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'hmn_send_otp' ) ) ) {
+		$nonce = isset( $_POST['nonce'] ) && is_scalar( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
+		if ( ! $nonce || ( ! wp_verify_nonce( $nonce, 'hmn_send_otp' ) && ! wp_verify_nonce( $nonce, 'hmn_ea_booking' ) ) ) {
 			wp_send_json_error( array( 'message' => __( 'درخواست نامعتبر است.', 'hmn-crm' ) ), 403 );
 		}
 
