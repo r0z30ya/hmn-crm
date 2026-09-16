@@ -1,0 +1,32 @@
+name: Build and Attach Plugin ZIP
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare Plugin Directory
+        run: |
+          mkdir -p build/hmn-crm
+          rsync -rc --exclude='.git*' --exclude='.github' --exclude='build' ./ build/hmn-crm/
+
+      - name: Create ZIP
+        run: |
+          cd build
+          zip -r ../hmn-crm.zip hmn-crm
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hmn-crm.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
