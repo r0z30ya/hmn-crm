@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: HMN CRM
-Description: اتوماسیون نوبت‌دهی 
-Version: 4.2
+Description: پنل مشتری مداری هومانا با قابلیت رزرو نوبت
+Version: 4.4
 Author: Houman
 */
 
@@ -12,7 +12,7 @@ require_once plugin_dir_path(__FILE__) . 'includes/class-core.php';
 
 register_activation_hook( __FILE__, 'hmn_crm_activate' );
 function hmn_crm_activate() {
-    HMN_CRM_Core::get_instance();
+    HMN_CRM_Core::get_instance()->migrate();
     flush_rewrite_rules();
 }
 

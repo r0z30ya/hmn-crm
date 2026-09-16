@@ -9,6 +9,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+require_once __DIR__ . '/class-module.php';
+
 /**
  * Main HMN CRM singleton.
  */
@@ -56,11 +58,18 @@ final class HMN_CRM_Core {
 
 	/** Register the staff portal URL. */
 	public function register_routes() {
+		/** Let feature modules perform their own, versioned schema migrations. */
+		do_action( 'hmn_crm_migrate' );
 		add_rewrite_rule( '^hcrm/?$', 'index.php?hmn_crm_portal=1', 'top' );
 		if ( '2.2.0' !== get_option( 'hmn_crm_rewrite_version' ) ) {
 			flush_rewrite_rules( false );
 			update_option( 'hmn_crm_rewrite_version', '2.2.0', false );
 		}
+	}
+
+	/** Run module migrations on plugin activation as well as normal requests. */
+	public function migrate() {
+		do_action( 'hmn_crm_migrate' );
 	}
 
 	/** Allow the internal portal query variable. */

@@ -4,8 +4,10 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class HMN_CRM_EasyAppointments {
 	const OPTION_NAME = 'hmn_crm_easyappointments_settings';
+	private static $instance = null;
 
 	public function __construct() {
+		self::$instance = $this;
 		add_action( 'wp_ajax_hmn_ea_bootstrap', array( $this, 'bootstrap_ajax' ) );
 		add_action( 'wp_ajax_nopriv_hmn_ea_bootstrap', array( $this, 'bootstrap_ajax' ) );
 		add_action( 'wp_ajax_hmn_ea_slots', array( $this, 'slots_ajax' ) );
@@ -14,11 +16,13 @@ final class HMN_CRM_EasyAppointments {
 		add_action( 'wp_ajax_nopriv_hmn_ea_book', array( $this, 'book_ajax' ) );
 		add_action( 'wp_ajax_hmn_ea_verify_otp', array( $this, 'verify_otp_ajax' ) );
 		add_action( 'wp_ajax_nopriv_hmn_ea_verify_otp', array( $this, 'verify_otp_ajax' ) );
-		add_action( 'wp_ajax_hmn_ea_operator_book', array( $this, 'operator_book_ajax' ) );
-		add_action( 'wp_ajax_hmn_ea_operator_customer', array( $this, 'operator_customer_ajax' ) );
-		add_action( 'wp_ajax_hmn_ea_customer_history', array( $this, 'customer_history_ajax' ) );
-		add_action( 'wp_ajax_hmn_ea_cancel_appointment', array( $this, 'cancel_appointment_ajax' ) );
+		// Protected CRM actions live in the customers and appointments modules.
 		add_shortcode( 'hmn_booking_form', array( $this, 'render_shortcode' ) );
+	}
+
+	/** Return the engine adapter for domain modules that need a legacy bridge. */
+	public static function instance() {
+		return self::$instance;
 	}
 
 	public static function settings() { $s = get_option( self::OPTION_NAME, array() ); return is_array( $s ) ? $s : array(); }
@@ -67,6 +71,16 @@ final class HMN_CRM_EasyAppointments {
 		if ( ! preg_match( '/^09\d{9}$/', $phone ) || ! $stored || ! hash_equals( (string) $stored, $otp ) ) {
 			wp_send_json_error( array( 'message' => 'کد تأیید اشتباه است یا منقضی شده است.' ), 403 );
 		}
+		wp_send_json_success();
+	}
+
+	/** Save CRM-only customer fields. */
+	public function customer_meta_save_ajax() {
+		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); }
+		$id = absint( $_POST['customer_id'] ?? 0 ); $file = sanitize_text_field( wp_unslash( $_POST['file_number'] ?? '' ) ); $national = preg_replace( '/\D+/', '', sanitize_text_field( wp_unslash( $_POST['national_id'] ?? '' ) ) );
+		if ( ! $id || ( $national && ! preg_match( '/^\d{10}$/', $national ) ) ) { wp_send_json_error( array( 'message' => 'شماره پرونده یا شماره ملی معتبر نیست.' ), 400 ); }
+		global $wpdb; $table = $wpdb->prefix . 'hmn_crm_customer_meta';
+		$wpdb->replace( $table, array( 'customer_id' => $id, 'file_number' => $file, 'national_id' => $national, 'updated_at' => current_time( 'mysql' ) ), array( '%d', '%s', '%s', '%s' ) );
 		wp_send_json_success();
 	}
 
