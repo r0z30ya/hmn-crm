@@ -16,6 +16,8 @@ final class HMN_CRM_EasyAppointments {
 		add_action( 'wp_ajax_nopriv_hmn_ea_verify_otp', array( $this, 'verify_otp_ajax' ) );
 		add_action( 'wp_ajax_hmn_ea_operator_book', array( $this, 'operator_book_ajax' ) );
 		add_action( 'wp_ajax_hmn_ea_operator_customer', array( $this, 'operator_customer_ajax' ) );
+		add_action( 'wp_ajax_hmn_ea_customer_history', array( $this, 'customer_history_ajax' ) );
+		add_action( 'wp_ajax_hmn_ea_cancel_appointment', array( $this, 'cancel_appointment_ajax' ) );
 		add_shortcode( 'hmn_booking_form', array( $this, 'render_shortcode' ) );
 	}
 
@@ -65,6 +67,31 @@ final class HMN_CRM_EasyAppointments {
 		if ( ! preg_match( '/^09\d{9}$/', $phone ) || ! $stored || ! hash_equals( (string) $stored, $otp ) ) {
 			wp_send_json_error( array( 'message' => 'کد تأیید اشتباه است یا منقضی شده است.' ), 403 );
 		}
+		wp_send_json_success();
+	}
+
+	/** Return appointment history (not clinical visit records) for a customer phone number. */
+	public function customer_history_ajax() {
+		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); }
+		$phone = preg_replace( '/\D+/', '', sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) ) );
+		if ( ! preg_match( '/^09\d{9}$/', $phone ) ) { wp_send_json_error( array( 'message' => 'شماره تلفن معتبر نیست.' ), 400 ); }
+		$rows = self::request( 'GET', 'appointments', null, array( 'from' => '2000-01-01', 'till' => '2100-01-01', 'with' => 'customer,service', 'aggregates' => 1, 'length' => 500 ) );
+		if ( is_wp_error( $rows ) ) { $this->error( $rows ); }
+		$history = array();
+		foreach ( $rows as $row ) { $customer = is_array( $row['customer'] ?? null ) ? $row['customer'] : array(); $customer_phone = preg_replace( '/\D+/', '', (string) ( $customer['phone'] ?? ( $customer['phone_number'] ?? '' ) ) ); if ( $phone !== $customer_phone ) { continue; } $start = (string) ( $row['start'] ?? ( $row['start_datetime'] ?? '' ) ); $service = is_array( $row['service'] ?? null ) ? $row['service'] : array(); $history[] = array( 'id' => absint( $row['id'] ?? 0 ), 'date' => self::jalali_date( substr( $start, 0, 10 ) ), 'time' => substr( $start, 11, 5 ), 'service' => sanitize_text_field( $service['name'] ?? '' ), 'status' => sanitize_text_field( $row['status'] ?? '' ) ); }
+		usort( $history, function( $a, $b ) { return $b['id'] <=> $a['id']; } );
+		wp_send_json_success( array( 'history' => $history ) );
+	}
+
+	/** Cancel an appointment in Easy!Appointments and notify the customer with the cancellation pattern. */
+	public function cancel_appointment_ajax() {
+		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); }
+		$id = absint( $_POST['appointment_id'] ?? 0 ); $silent = ! empty( $_POST['silent'] );
+		if ( ! $id ) { wp_send_json_error( array( 'message' => 'شناسه نوبت نامعتبر است.' ), 400 ); }
+		$appointment = self::request( 'GET', 'appointments/' . $id ); if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); }
+		$customer_id = absint( $appointment['customerId'] ?? 0 ); $start = (string) ( $appointment['start'] ?? '' );
+		if ( ! $silent && $customer_id ) { $customer = self::request( 'GET', 'customers/' . $customer_id ); if ( ! is_wp_error( $customer ) ) { $phone = preg_replace( '/\D+/', '', (string) ( $customer['phone'] ?? ( $customer['phone_number'] ?? '' ) ) ); $name = trim( (string) ( $customer['firstName'] ?? ( $customer['first_name'] ?? '' ) ) . ' ' . (string) ( $customer['lastName'] ?? ( $customer['last_name'] ?? '' ) ) ); $sms = get_option( 'hmn_crm_sms_settings', array() ); $body_id = is_array( $sms ) ? absint( $sms['melipayamak_booking_cancel_body_id'] ?? 0 ) : 0; if ( $body_id && $phone ) { ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( $name, self::jalali_date( substr( $start, 0, 10 ) ), substr( $start, 11, 5 ) ) ); } } }
+		$deleted = self::request( 'DELETE', 'appointments/' . $id ); if ( is_wp_error( $deleted ) ) { $this->error( $deleted ); }
 		wp_send_json_success();
 	}
 
