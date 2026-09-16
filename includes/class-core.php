@@ -71,7 +71,8 @@ final class HMN_CRM_Core {
 
 	/** Render the portal outside the theme when /hcrm is requested. */
 	public function render_portal() {
-		if ( ! get_query_var( 'hmn_crm_portal' ) ) {
+		$request_path = trim( (string) wp_parse_url( wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ), PHP_URL_PATH ), '/' );
+		if ( ! get_query_var( 'hmn_crm_portal' ) && 'hcrm' !== $request_path ) {
 			return;
 		}
 		if ( ! is_user_logged_in() ) {
