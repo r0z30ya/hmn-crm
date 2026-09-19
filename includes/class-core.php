@@ -39,6 +39,7 @@ final class HMN_CRM_Core {
 		add_action( 'init', array( $this, 'register_routes' ) );
 		add_filter( 'query_vars', array( $this, 'register_query_var' ) );
 		add_action( 'template_redirect', array( $this, 'render_portal' ) );
+		add_action( 'wp_footer', array( $this, 'render_portal_navigation_enhancements' ), 20 );
 	}
 
 	/** Register the HMN CRM top-level menu and module submenus. */
@@ -102,6 +103,15 @@ final class HMN_CRM_Core {
 	public function redirect_to_portal() {
 		wp_safe_redirect( home_url( '/hcrm/' ) );
 		exit;
+	}
+
+	/** Keep the scheduling link nested beneath the dashboard in every CRM portal view. */
+	public function render_portal_navigation_enhancements() {
+		$settings_url = add_query_arg( 'section', 'scheduling', home_url( '/hcrm/' ) );
+		?>
+		<style>.hmn-portal .hmn-nav-child{margin:-4px 0 2px 18px!important;padding:9px 12px!important;font-size:12px;color:#bfc8df!important}.hmn-portal .hmn-nav-child span{font-size:12px}.hmn-portal .hmn-nav-child:hover,.hmn-portal .hmn-nav-child.is-active{color:#fff!important}</style>
+		<script>(function(){var navs=document.querySelectorAll('.hmn-portal .hmn-nav'),url=<?php echo wp_json_encode( $settings_url ); ?>;navs.forEach(function(nav){var link=nav.querySelector('a[href*="section=scheduling"]'),parent=nav.querySelector('a');if(link){link.classList.add('hmn-nav-child');return}if(!parent)return;link=document.createElement('a');link.href=url;link.className='hmn-nav-child';link.innerHTML='<span>⚙</span> تنظیمات نوبت‌دهی';parent.insertAdjacentElement('afterend',link)})})();</script>
+		<?php
 	}
 
 	/** Render the top-level dashboard placeholder. */

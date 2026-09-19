@@ -42,6 +42,7 @@ final class HMN_CRM_Dashboard {
 		<div class="hmn-brand"><span class="hmn-brand-mark">H</span><span>HMN CRM</span></div>
 		<nav class="hmn-nav">
 			<a class="is-active" href="<?php echo esc_url( $base ); ?>"><span>⌂</span> داشبورد نوبت‌ها</a>
+			<a class="hmn-nav-child" href="<?php echo esc_url( add_query_arg( 'section', 'scheduling', $base ) ); ?>"><span>⚙</span> تنظیمات نوبت‌دهی</a>
 			<a href="<?php echo esc_url( add_query_arg( 'section', 'customers', $base ) ); ?>"><span>♙</span> مشتریان</a>
 			<a href="<?php echo esc_url( admin_url( 'admin.php?page=hmn-crm-sms' ) ); ?>"><span>✉</span> تنظیمات پیامک</a>
 			<a href="<?php echo esc_url( admin_url() ); ?>"><span>⚙</span> پیشخوان وردپرس</a>
@@ -50,7 +51,7 @@ final class HMN_CRM_Dashboard {
 	</aside>
 	<main class="hmn-main">
 		<?php self::render_operator_form( $date ); ?>
-		<header class="hmn-topbar"><button class="hmn-menu" type="button" aria-controls="hmn-sidebar" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مرکز درمانی</p><h1>نوبت‌ها</h1></div><div class="hmn-topbar-actions"><button type="button" class="hmn-new-booking">+ ثبت نوبت جدید</button><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'date' => wp_date( 'Y-m-d' ), 'view' => 'daily' ), $base ) ); ?>">امروز</a><a class="hmn-toolbar-icon" href="<?php echo esc_url( add_query_arg( 'section', 'scheduling', $base ) ); ?>" aria-label="تنظیمات نوبت‌دهی" title="تنظیمات نوبت‌دهی"><span aria-hidden="true">⚙</span></a><button type="button" class="hmn-toolbar-icon hmn-theme-toggle" aria-label="فعال‌سازی حالت تیره" title="تغییر حالت روشن و تیره"><span class="hmn-theme-sun" aria-hidden="true">☀</span><span class="hmn-theme-moon" aria-hidden="true">☾</span></button></div></header>
+		<header class="hmn-topbar"><button class="hmn-menu" type="button" aria-controls="hmn-sidebar" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مرکز درمانی</p><h1>نوبت‌ها</h1></div><div class="hmn-topbar-actions"><button type="button" class="hmn-new-booking">+ ثبت نوبت جدید</button><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'date' => wp_date( 'Y-m-d' ), 'view' => 'daily' ), $base ) ); ?>">امروز</a><button type="button" class="hmn-toolbar-icon hmn-theme-toggle" aria-label="فعال‌سازی حالت تیره" title="تغییر حالت روشن و تیره"><span class="hmn-theme-sun" aria-hidden="true">☀</span><span class="hmn-theme-moon" aria-hidden="true">☾</span></button></div></header>
 		<section class="hmn-summary">
 			<div><span>نوبت‌های نمایش داده‌شده</span><strong><?php echo esc_html( count( $appointments ) ); ?></strong></div>
 			<div><span>تاریخ انتخاب‌شده</span><strong><?php echo esc_html( self::jalali_date( $date ) ); ?></strong></div>
