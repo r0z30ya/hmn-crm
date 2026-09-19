@@ -84,6 +84,9 @@ final class HMN_CRM_Appointments implements HMN_CRM_Module_Interface {
 		if ( ! $id ) { wp_send_json_error( array( 'message' => 'شناسه نوبت معتبر نیست.' ), 400 ); }
 		$appointment = HMN_CRM_EasyAppointments::request( 'GET', 'appointments/' . $id );
 		if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); }
+		if ( class_exists( 'HMN_CRM_Scheduling' ) && ! HMN_CRM_Scheduling::can_cancel_appointment( $appointment ) ) {
+			wp_send_json_error( array( 'message' => 'مهلت لغو یا جابه‌جایی این نوبت گذشته است.' ), 409 );
+		}
 		if ( ! $silent && ! empty( $appointment['customerId'] ) ) {
 			$customer = HMN_CRM_EasyAppointments::request( 'GET', 'customers/' . absint( $appointment['customerId'] ) );
 			if ( ! is_wp_error( $customer ) ) {
