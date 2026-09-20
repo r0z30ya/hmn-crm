@@ -1,0 +1,79 @@
+<?php
+/** CRM-only settings for Easy!Appointments and SMS. */
+if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+final class HMN_CRM_Settings implements HMN_CRM_Module_Interface {
+	public function __construct() { $this->boot(); }
+	public function boot() {
+		add_action( 'wp_ajax_hmn_crm_settings_save', array( $this, 'save_ajax' ) );
+	}
+
+	public static function render_portal( $base, $user ) {
+		$services = HMN_CRM_EasyAppointments::request( 'GET', 'services', null, array( 'length' => 500 ) );
+		$providers = HMN_CRM_EasyAppointments::request( 'GET', 'providers', null, array( 'length' => 500 ) );
+		$services = is_array( $services ) ? $services : array();
+		$providers = is_array( $providers ) ? $providers : array();
+		$sms = get_option( HMN_CRM_SMS_Settings::OPTION_NAME, array() );
+		$ea = HMN_CRM_EasyAppointments::settings();
+		$providers_url = empty( $ea['base_url'] ) ? '' : trailingslashit( $ea['base_url'] ) . 'index.php/providers';
+		/* Providers belong to Easy!Appointments; CRM staff must not create provider logins. */
+		add_action( 'wp_head', static function() { echo '<style>form[data-hmn-settings="provider"]{display:none!important}</style>'; }, 100 );
+		add_action( 'wp_footer', static function() use ( $providers_url ) { ?>
+			<script>(function(){var form=document.querySelector('form[data-hmn-settings="provider"]');if(!form)return;var card=form.closest('.hmn-settings-card'),note=card&&card.querySelector('p');if(note)note.textContent='فهرست پزشکان از موتور نوبت‌دهی خوانده می‌شود؛ پزشک حساب ورود CRM ندارد.';if(card&&<?php echo wp_json_encode( $providers_url ); ?>){var link=document.createElement('a');link.className='hmn-settings-save';link.href=<?php echo wp_json_encode( $providers_url ); ?>;link.target='_blank';link.rel='noopener';link.textContent='مدیریت پزشکان در Easy!Appointments';card.insertBefore(link,form.nextSibling);}})();</script>
+		<?php }, 5 );
+		?>
+<!doctype html><html <?php language_attributes(); ?> dir="rtl"><head><meta charset="<?php bloginfo( 'charset' ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تنظیمات CRM</title><?php wp_head(); ?><style><?php HMN_CRM_Dashboard::portal_styles(); ?>.hmn-settings{display:grid;gap:20px}.hmn-settings-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px}.hmn-settings-card h2{margin:0 0 7px;font-size:19px}.hmn-settings-card p{color:var(--muted);margin:0 0 18px}.hmn-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.hmn-settings-grid label{display:grid;gap:6px;font-weight:700}.hmn-settings-grid input,.hmn-settings-grid textarea,.hmn-settings-grid select{min-height:42px;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font:inherit;background:var(--surface);color:var(--ink)}.hmn-settings-grid textarea{min-height:90px}.hmn-settings-grid .full{grid-column:1/-1}.hmn-settings-save{margin-top:16px;border:0;border-radius:8px;padding:11px 18px;background:var(--brand);color:#fff;font:inherit;font-weight:700;cursor:pointer}.hmn-settings-message{margin-top:12px;min-height:20px;color:#027a48}.hmn-settings-message.error{color:#b42318}.hmn-settings-table{width:100%;border-collapse:collapse}.hmn-settings-table th,.hmn-settings-table td{padding:11px;text-align:right;border-bottom:1px solid var(--line)}.hmn-settings-table th{color:var(--muted);font-size:12px}.hmn-checks{display:flex;flex-wrap:wrap;gap:9px}.hmn-checks label{display:flex;align-items:center;gap:5px;font-weight:400}@media(max-width:650px){.hmn-settings-grid{grid-template-columns:1fr}.hmn-settings-grid .full{grid-column:auto}}</style></head><body class="hmn-portal-body"><div class="hmn-portal"><aside class="hmn-sidebar"><div class="hmn-brand"><span class="hmn-brand-mark">H</span><span>HMN CRM</span></div><nav class="hmn-nav"><a href="<?php echo esc_url( $base ); ?>">⌂ داشبورد نوبت‌ها</a><a href="<?php echo esc_url( add_query_arg( 'section', 'customers', $base ) ); ?>">♙ مشتریان</a><a href="<?php echo esc_url( add_query_arg( 'section', 'scheduling', $base ) ); ?>">⚙ تنظیمات نوبت‌دهی</a><a class="is-active" href="<?php echo esc_url( add_query_arg( 'section', 'settings', $base ) ); ?>">⚙ تنظیمات CRM</a></nav><div class="hmn-user"><span class="hmn-avatar"><?php echo esc_html( mb_substr( $user->display_name ?: $user->user_login, 0, 1 ) ); ?></span><div><strong><?php echo esc_html( $user->display_name ); ?></strong><a href="<?php echo esc_url( wp_logout_url( $base ) ); ?>">خروج از حساب</a></div></div></aside><main class="hmn-main"><header class="hmn-topbar"><div><p class="hmn-eyebrow">تنظیمات سامانه</p><h1>تنظیمات CRM</h1></div><a class="hmn-today" href="<?php echo esc_url( $base ); ?>">بازگشت به نوبت‌ها</a></header><div class="hmn-settings">
+<section class="hmn-settings-card"><h2>پزشکان</h2><p>پزشک جدید مستقیماً در Easy!Appointments ساخته می‌شود.</p><form data-hmn-settings="provider"><div class="hmn-settings-grid"><label>نام<input name="first_name" required></label><label>نام خانوادگی<input name="last_name" required></label><label>ایمیل<input name="email" type="email" required></label><label>تلفن<input name="phone"></label><label>نام کاربری EA<input name="username" required></label><label>رمز ورود EA<input name="password" type="password" minlength="8" required></label><label class="full">سرویس‌های قابل ارائه<div class="hmn-checks"><?php foreach ( $services as $service ) : ?><label><input type="checkbox" name="services[]" value="<?php echo esc_attr( absint( $service['id'] ?? 0 ) ); ?>"><?php echo esc_html( $service['name'] ?? '' ); ?></label><?php endforeach; ?></div></label></div><button class="hmn-settings-save">افزودن پزشک</button><div class="hmn-settings-message"></div></form><?php self::providers_table( $providers ); ?></section>
+<section class="hmn-settings-card"><h2>سرویس‌ها</h2><p>سرویس جدید و ارتباط آن با پزشکان در Easy!Appointments ذخیره می‌شود.</p><form data-hmn-settings="service"><div class="hmn-settings-grid"><label>نام سرویس<input name="name" required></label><label>مدت (دقیقه)<input name="duration" type="number" min="1" value="15" required></label><label>هزینه<input name="price" type="number" min="0" value="0"></label><label>فاصله اسلات (دقیقه)<input name="slot_interval" type="number" min="1" value="15"></label><label>تعداد رزرو هم‌زمان<input name="attendants_number" type="number" min="1" value="1"></label><label>رنگ<input name="color" type="color" value="#5b4cf0"></label><label class="full">توضیحات<textarea name="description"></textarea></label><label class="full">پزشکان ارائه‌دهنده<div class="hmn-checks"><?php foreach ( $providers as $provider ) : ?><label><input type="checkbox" name="providers[]" value="<?php echo esc_attr( absint( $provider['id'] ?? 0 ) ); ?>"><?php echo esc_html( trim( ( $provider['firstName'] ?? '' ) . ' ' . ( $provider['lastName'] ?? '' ) ) ); ?></label><?php endforeach; ?></div></label></div><button class="hmn-settings-save">افزودن سرویس</button><div class="hmn-settings-message"></div></form><?php self::services_table( $services ); ?></section>
+<section class="hmn-settings-card"><h2>تنظیمات پیامک</h2><p>این صفحه جایگزین تنظیمات پیامک در پیشخوان WordPress است.</p><form data-hmn-settings="sms"><div class="hmn-settings-grid"><label>کلید API ملی‌پیامک<input name="melipayamak_api_key" type="password" value="<?php echo esc_attr( $sms['melipayamak_api_key'] ?? '' ); ?>"></label><label>شماره فرستنده<input name="melipayamak_sender" value="<?php echo esc_attr( $sms['melipayamak_sender'] ?? '' ); ?>"></label><?php foreach ( array( 'melipayamak_otp_body_id' => 'الگوی OTP', 'melipayamak_booking_body_id' => 'الگوی ثبت نوبت', 'melipayamak_booking_edit_body_id' => 'الگوی ویرایش نوبت', 'melipayamak_booking_cancel_body_id' => 'الگوی لغو نوبت', 'melipayamak_booking_reminder_body_id' => 'الگوی یادآوری نوبت' ) as $key => $label ) : ?><label><?php echo esc_html( $label ); ?><input name="<?php echo esc_attr( $key ); ?>" type="number" min="0" value="<?php echo esc_attr( $sms[ $key ] ?? '' ); ?>"></label><?php endforeach; ?></div><button class="hmn-settings-save">ذخیره تنظیمات پیامک</button><div class="hmn-settings-message"></div></form></section>
+<section class="hmn-settings-card"><h2>اتصال Easy!Appointments</h2><p>آدرس موتور و کلید API فقط در CRM ذخیره می‌شود.</p><form data-hmn-settings="ea"><div class="hmn-settings-grid"><label>آدرس نصب<input name="base_url" type="url" required value="<?php echo esc_attr( $ea['base_url'] ?? '' ); ?>"></label><label>کلید API<input name="api_key" type="password" required value="<?php echo esc_attr( $ea['api_key'] ?? '' ); ?>"></label><label>پزشک پیش‌فرض<input name="default_provider_id" type="number" min="1" value="<?php echo esc_attr( $ea['default_provider_id'] ?? '' ); ?>"></label><label><span>نمایش پزشک در فرم سایت</span><input name="hide_provider" type="checkbox" value="1" <?php checked( empty( $ea['hide_provider'] ) ); ?>></label></div><button class="hmn-settings-save">ذخیره اتصال</button><div class="hmn-settings-message"></div></form></section>
+</div></main></div><script>(function(){var ajax=<?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>,nonce=<?php echo wp_json_encode( wp_create_nonce( 'hmn_crm_settings' ) ); ?>;document.querySelectorAll('form[data-hmn-settings]').forEach(function(form){form.addEventListener('submit',function(e){e.preventDefault();var message=form.querySelector('.hmn-settings-message'),data=new FormData(form);data.append('action','hmn_crm_settings_save');data.append('nonce',nonce);data.append('kind',form.dataset.hmnSettings);message.className='hmn-settings-message';message.textContent='در حال ذخیره…';fetch(ajax,{method:'POST',body:new URLSearchParams(data)}).then(function(r){return r.json()}).then(function(r){if(!r.success)throw Error(r.data&&r.data.message||'خطا');message.textContent='ذخیره شد. صفحه برای دریافت اطلاعات جدید بازخوانی می‌شود.';setTimeout(function(){location.reload()},500)}).catch(function(err){message.className='hmn-settings-message error';message.textContent=err.message})})})})();</script><?php wp_footer(); ?></body></html><?php
+	}
+
+	public function save_ajax() {
+		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SETTINGS ) || ! check_ajax_referer( 'hmn_crm_settings', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); }
+		$kind = sanitize_key( wp_unslash( $_POST['kind'] ?? '' ) );
+		if ( 'service' === $kind ) { $this->save_service(); }
+		if ( 'provider' === $kind ) { wp_send_json_error( array( 'message' => 'پزشکان فقط در Easy!Appointments مدیریت می‌شوند.' ), 400 ); }
+		if ( 'sms' === $kind ) { $this->save_sms(); }
+		if ( 'ea' === $kind ) { $this->save_ea(); }
+		wp_send_json_error( array( 'message' => 'درخواست نامعتبر است.' ), 400 );
+	}
+
+	private function save_service() {
+		$name = sanitize_text_field( wp_unslash( $_POST['name'] ?? '' ) ); if ( ! $name ) { wp_send_json_error( array( 'message' => 'نام سرویس الزامی است.' ), 400 ); }
+		$provider_ids = array_values( array_filter( array_unique( array_map( 'absint', (array) ( $_POST['providers'] ?? array() ) ) ) ) );
+		if ( $provider_ids ) {
+			$providers = HMN_CRM_EasyAppointments::request( 'GET', 'providers', null, array( 'length' => 500 ) );
+			if ( is_wp_error( $providers ) ) { wp_send_json_error( array( 'message' => $providers->get_error_message() ), 502 ); }
+			$known_ids = array_map( 'absint', wp_list_pluck( is_array( $providers ) ? $providers : array(), 'id' ) );
+			if ( array_diff( $provider_ids, $known_ids ) ) { wp_send_json_error( array( 'message' => 'پزشک انتخاب‌شده در Easy!Appointments معتبر نیست؛ سرویس ثبت نشد.' ), 400 ); }
+		}
+		$payload = array( 'name' => $name, 'duration' => max( 1, absint( $_POST['duration'] ?? 15 ) ), 'price' => max( 0, (float) ( $_POST['price'] ?? 0 ) ), 'currency' => 'IRR', 'description' => sanitize_textarea_field( wp_unslash( $_POST['description'] ?? '' ) ), 'location' => '', 'color' => sanitize_hex_color( wp_unslash( $_POST['color'] ?? '' ) ) ?: '#5b4cf0', 'slotInterval' => max( 1, absint( $_POST['slot_interval'] ?? 15 ) ), 'attendantsNumber' => max( 1, absint( $_POST['attendants_number'] ?? 1 ) ), 'isPrivate' => false, 'providers' => $provider_ids );
+		$result = HMN_CRM_EasyAppointments::request( 'POST', 'services', $payload ); if ( is_wp_error( $result ) ) { wp_send_json_error( array( 'message' => $result->get_error_message() ), 502 ); } wp_send_json_success();
+	}
+
+	private function save_provider() {
+		$first = sanitize_text_field( wp_unslash( $_POST['first_name'] ?? '' ) ); $last = sanitize_text_field( wp_unslash( $_POST['last_name'] ?? '' ) ); $email = sanitize_email( wp_unslash( $_POST['email'] ?? '' ) ); $username = sanitize_user( wp_unslash( $_POST['username'] ?? '' ), true ); $password = (string) ( $_POST['password'] ?? '' );
+		if ( ! $first || ! $last || ! is_email( $email ) || ! $username || strlen( $password ) < 8 ) { wp_send_json_error( array( 'message' => 'نام، نام خانوادگی، ایمیل، نام کاربری و رمز حداقل ۸ کاراکتری الزامی است.' ), 400 ); }
+		$payload = array( 'firstName' => $first, 'lastName' => $last, 'email' => $email, 'phone' => sanitize_text_field( wp_unslash( $_POST['phone'] ?? '' ) ), 'timezone' => 'Asia/Tehran', 'language' => 'english', 'services' => array_map( 'absint', (array) ( $_POST['services'] ?? array() ) ), 'settings' => array( 'username' => $username, 'password' => $password, 'notifications' => true, 'calendar_view' => 'default' ) );
+		$result = HMN_CRM_EasyAppointments::request( 'POST', 'providers', $payload ); if ( is_wp_error( $result ) ) { wp_send_json_error( array( 'message' => $result->get_error_message() ), 502 ); } wp_send_json_success();
+	}
+
+	private function save_sms() {
+		$current = get_option( HMN_CRM_SMS_Settings::OPTION_NAME, array() ); $current = is_array( $current ) ? $current : array();
+		foreach ( array( 'melipayamak_api_key', 'melipayamak_sender' ) as $key ) { $current[ $key ] = sanitize_text_field( wp_unslash( $_POST[ $key ] ?? '' ) ); }
+		foreach ( array( 'melipayamak_otp_body_id', 'melipayamak_booking_body_id', 'melipayamak_booking_edit_body_id', 'melipayamak_booking_cancel_body_id', 'melipayamak_booking_reminder_body_id' ) as $key ) { $current[ $key ] = absint( $_POST[ $key ] ?? 0 ); }
+		update_option( HMN_CRM_SMS_Settings::OPTION_NAME, $current ); wp_send_json_success();
+	}
+
+	private function save_ea() {
+		$settings = array( 'base_url' => esc_url_raw( untrailingslashit( wp_unslash( $_POST['base_url'] ?? '' ) ) ), 'api_key' => sanitize_text_field( wp_unslash( $_POST['api_key'] ?? '' ) ), 'hide_provider' => empty( $_POST['hide_provider'] ) ? 1 : 0, 'default_provider_id' => absint( $_POST['default_provider_id'] ?? 0 ) );
+		if ( ! $settings['base_url'] || ! $settings['api_key'] ) { wp_send_json_error( array( 'message' => 'آدرس و کلید API الزامی هستند.' ), 400 ); }
+		update_option( HMN_CRM_EasyAppointments::OPTION_NAME, $settings ); wp_send_json_success();
+	}
+
+	private static function providers_table( $providers ) { ?><table class="hmn-settings-table"><thead><tr><th>نام</th><th>ایمیل</th><th>تلفن</th></tr></thead><tbody><?php foreach ( $providers as $provider ) : ?><tr><td><?php echo esc_html( trim( ( $provider['firstName'] ?? '' ) . ' ' . ( $provider['lastName'] ?? '' ) ) ); ?></td><td><?php echo esc_html( $provider['email'] ?? '' ); ?></td><td dir="ltr"><?php echo esc_html( $provider['phone'] ?? '' ); ?></td></tr><?php endforeach; ?></tbody></table><?php }
+	private static function services_table( $services ) { ?><table class="hmn-settings-table"><thead><tr><th>نام</th><th>مدت</th><th>هزینه</th></tr></thead><tbody><?php foreach ( $services as $service ) : ?><tr><td><?php echo esc_html( $service['name'] ?? '' ); ?></td><td><?php echo esc_html( $service['duration'] ?? '' ); ?> دقیقه</td><td><?php echo esc_html( $service['price'] ?? 0 ); ?></td></tr><?php endforeach; ?></tbody></table><?php }
+}
+new HMN_CRM_Settings();

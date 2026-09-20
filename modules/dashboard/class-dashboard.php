@@ -24,6 +24,7 @@ final class HMN_CRM_Dashboard {
 		$base = home_url( '/hcrm/' );
 		if ( isset( $_GET['section'] ) && 'customers' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Customers' ) ) { if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_CUSTOMERS ) ) { wp_die( 'شما به بخش مشتریان دسترسی ندارید.', 403 ); } HMN_CRM_Customers::render_portal( $base, $user ); return; }
 		if ( isset( $_GET['section'] ) && 'scheduling' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Scheduling' ) ) { if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SCHEDULING ) ) { wp_die( 'شما به تنظیمات نوبت‌دهی دسترسی ندارید.', 403 ); } HMN_CRM_Scheduling::render_portal( $base, $user ); return; }
+		if ( isset( $_GET['section'] ) && 'settings' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Settings' ) ) { if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SETTINGS ) ) { wp_die( 'شما به تنظیمات CRM دسترسی ندارید.', 403 ); } HMN_CRM_Settings::render_portal( $base, $user ); return; }
 		?>
 <!doctype html>
 <html <?php language_attributes(); ?> dir="rtl">

@@ -165,28 +165,15 @@ final class HMN_CRM_Scheduling implements HMN_CRM_Module_Interface {
 		return sprintf( '%04d-%02d-%02d', $gy, $gm, $gd );
 	}
 
-	/** Write supported schedule values into Easy!Appointments through its REST API. */
+	/** Synchronize CRM-owned exceptions only; EA owns provider calendars and services. */
 	private static function sync_to_easyappointments( $settings ) {
 		if ( ! class_exists( 'HMN_CRM_EasyAppointments' ) || ! HMN_CRM_EasyAppointments::configured() ) { return new WP_Error( 'hmn_engine_missing', 'Easy!Appointments connection is not configured.' ); }
 		$providers = HMN_CRM_EasyAppointments::request( 'GET', 'providers', null, array( 'length' => 200 ) );
-		$services = HMN_CRM_EasyAppointments::request( 'GET', 'services', null, array( 'length' => 200 ) );
-		if ( is_wp_error( $providers ) ) { return $providers; } if ( is_wp_error( $services ) ) { return $services; }
-		$providers = is_array( $providers ) ? $providers : array(); $services = is_array( $services ) ? $services : array();
-		$working_plan = self::engine_working_plan( $settings['plan'] ?? array() );
-		foreach ( $providers as $provider ) {
-			$id = absint( $provider['id'] ?? 0 ); if ( ! $id ) { continue; }
-			$result = HMN_CRM_EasyAppointments::request( 'PUT', 'providers/' . $id, array( 'settings' => array( 'workingPlan' => $working_plan ) ) );
-			if ( is_wp_error( $result ) ) { return new WP_Error( 'hmn_engine_provider', 'Could not save provider working plan: ' . $result->get_error_message() ); }
-		}
-		$engine_interval = max( 1, absint( $settings['slot_step'] ?? 15 ) + absint( $settings['buffer_minutes'] ?? 0 ) );
-		foreach ( $services as $service ) {
-			$id = absint( $service['id'] ?? 0 ); if ( ! $id ) { continue; }
-			$result = HMN_CRM_EasyAppointments::request( 'PUT', 'services/' . $id, array( 'slotInterval' => $engine_interval, 'attendantsNumber' => max( 1, absint( $settings['concurrent_bookings'] ?? 1 ) ) ) );
-			if ( is_wp_error( $result ) ) { return new WP_Error( 'hmn_engine_service', 'Could not save service slot interval: ' . $result->get_error_message() ); }
-		}
-		foreach ( array( 'book_advance_timeout' => absint( $settings['min_notice_hours'] ?? 0 ) * 60, 'future_booking_limit' => absint( $settings['max_future_days'] ?? 30 ) ) as $name => $value ) {
-			$result = HMN_CRM_EasyAppointments::request( 'PUT', 'settings/' . $name, array( 'value' => (string) $value ) );
-			if ( is_wp_error( $result ) ) { return new WP_Error( 'hmn_engine_setting', 'Could not save engine booking rule: ' . $result->get_error_message() ); }
+		if ( is_wp_error( $providers ) ) { return $providers; }
+		$providers = is_array( $providers ) ? $providers : array();
+		foreach ( (array) ( $settings['exceptions'] ?? array() ) as $exception ) {
+			if ( ! self::jalali_to_gregorian( $exception['start_date'] ?? '' ) ) { return new WP_Error( 'hmn_engine_invalid_exception', 'A scheduling exception has an invalid date.' ); }
+			if ( ! self::exception_provider_ids( $exception['target'] ?? '', $providers ) ) { return new WP_Error( 'hmn_engine_provider_missing', 'No Easy!Appointments provider is available for a scheduling exception.' ); }
 		}
 		$previous = get_option( self::ENGINE_MAP_OPTION, array() );
 		foreach ( (array) ( $previous['working_plan_exceptions'] ?? array() ) as $id ) { $result = HMN_CRM_EasyAppointments::request( 'DELETE', 'working_plan_exceptions/' . absint( $id ) ); if ( is_wp_error( $result ) && 404 !== (int) ( $result->get_error_data()['status'] ?? 0 ) ) { return $result; } }
@@ -220,7 +207,7 @@ final class HMN_CRM_Scheduling implements HMN_CRM_Module_Interface {
 	}
 
 	public function save() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'hmn_crm_save_scheduling' ) ) { wp_die( 'دسترسی نامعتبر است.' ); }
+		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SCHEDULING ) || ! check_admin_referer( 'hmn_crm_save_scheduling' ) ) { wp_die( 'دسترسی نامعتبر است.' ); }
 		$defaults = self::defaults(); $posted = wp_unslash( $_POST ); $plan = array();
 		foreach ( $defaults['plan'] as $i => $day ) { $row = is_array( $posted['plan'][ $i ] ?? null ) ? $posted['plan'][ $i ] : array(); $plan[ $i ] = array( 'label' => $day['label'], 'enabled' => empty( $row['enabled'] ) ? 0 : 1, 'start' => self::time( $row['start'] ?? $day['start'] ), 'end' => self::time( $row['end'] ?? $day['end'] ), 'break_start' => self::time( $row['break_start'] ?? '' ), 'break_end' => self::time( $row['break_end'] ?? '' ) ); }
 		$exceptions = array();
@@ -233,7 +220,7 @@ final class HMN_CRM_Scheduling implements HMN_CRM_Module_Interface {
 
 	/** Queue a fresh sync attempt from the protected CRM portal. */
 	public function retry_sync() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'hmn_crm_sync_scheduling' ) ) { wp_die( 'دسترسی نامعتبر است.' ); }
+		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SCHEDULING ) || ! check_admin_referer( 'hmn_crm_sync_scheduling' ) ) { wp_die( 'دسترسی نامعتبر است.' ); }
 		self::queue_sync( true );
 		wp_safe_redirect( add_query_arg( array( 'section' => 'scheduling', 'sync' => 'queued' ), home_url( '/hcrm/' ) ) ); exit;
 	}

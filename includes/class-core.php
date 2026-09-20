@@ -16,10 +16,12 @@ require_once __DIR__ . '/class-module.php';
  */
 final class HMN_CRM_Core {
 	const ROLE_OPERATOR = 'hmn_crm_operator';
+	const ROLE_MANAGER = 'hmn_crm_manager';
 	const CAP_ACCESS = 'hmn_crm_access';
 	const CAP_MANAGE_APPOINTMENTS = 'hmn_crm_manage_appointments';
 	const CAP_MANAGE_CUSTOMERS = 'hmn_crm_manage_customers';
 	const CAP_MANAGE_SCHEDULING = 'hmn_crm_manage_scheduling';
+	const CAP_MANAGE_SETTINGS = 'hmn_crm_manage_settings';
 
 	/**
 	 * Singleton instance.
@@ -40,21 +42,19 @@ final class HMN_CRM_Core {
 	 */
 	private function __construct() {
 		$this->load_modules();
-		add_action( 'init', array( $this, 'ensure_roles' ), 1 );
 		add_action( 'admin_menu', array( $this, 'register_admin_menu' ) );
 		add_action( 'init', array( $this, 'register_routes' ) );
 		add_filter( 'query_vars', array( $this, 'register_query_var' ) );
 		add_action( 'template_redirect', array( $this, 'render_portal' ) );
 		add_action( 'wp_footer', array( $this, 'render_portal_navigation_enhancements' ), 20 );
-		add_action( 'admin_post_nopriv_hmn_crm_login', array( $this, 'handle_crm_login' ) );
-		add_action( 'admin_post_hmn_crm_login', array( $this, 'handle_crm_login' ) );
-		add_action( 'admin_init', array( $this, 'keep_operators_out_of_wp_admin' ) );
-		add_filter( 'show_admin_bar', array( $this, 'hide_operator_admin_bar' ) );
-		add_filter( 'login_redirect', array( $this, 'redirect_operator_after_wp_login' ), 10, 3 );
 	}
 
 	/** Create the base CRM role and its capability vocabulary. */
 	public function ensure_roles() {
+		if ( class_exists( 'HMN_CRM_Access' ) ) {
+			HMN_CRM_Access::ensure_roles();
+			return;
+		}
 		$capabilities = array(
 			'read' => true,
 			self::CAP_ACCESS => true,
@@ -64,11 +64,13 @@ final class HMN_CRM_Core {
 		$role = get_role( self::ROLE_OPERATOR );
 		if ( ! $role ) {
 			add_role( self::ROLE_OPERATOR, 'اپراتور CRM', $capabilities );
-			return;
+		} else {
+			foreach ( $capabilities as $capability => $granted ) { if ( $granted ) { $role->add_cap( $capability ); } }
 		}
-		foreach ( $capabilities as $capability => $granted ) {
-			if ( $granted ) { $role->add_cap( $capability ); }
-		}
+		$manager_capabilities = array_merge( $capabilities, array( self::CAP_MANAGE_SCHEDULING => true, self::CAP_MANAGE_SETTINGS => true ) );
+		$manager = get_role( self::ROLE_MANAGER );
+		if ( ! $manager ) { add_role( self::ROLE_MANAGER, 'مدیر CRM', $manager_capabilities ); }
+		else { foreach ( $manager_capabilities as $capability => $granted ) { if ( $granted ) { $manager->add_cap( $capability ); } } }
 	}
 
 	/** Administrators retain CRM access; other users need an explicit CRM capability. */
@@ -121,7 +123,8 @@ final class HMN_CRM_Core {
 			return;
 		}
 		if ( ! is_user_logged_in() ) {
-			$this->render_crm_login();
+			if ( class_exists( 'HMN_CRM_Auth' ) ) { HMN_CRM_Auth::render_login(); }
+			else { $this->render_crm_login(); }
 			exit;
 		}
 		if ( ! self::can( self::CAP_ACCESS ) ) {
@@ -177,6 +180,8 @@ final class HMN_CRM_Core {
 	/** CRM-only users never enter the WordPress administration area. */
 	public function keep_operators_out_of_wp_admin() {
 		if ( ! is_user_logged_in() || current_user_can( 'manage_options' ) || wp_doing_ajax() ) { return; }
+		$action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
+		if ( 0 === strpos( $action, 'hmn_crm_' ) ) { return; }
 		if ( self::can( self::CAP_ACCESS ) ) {
 			wp_safe_redirect( home_url( '/hcrm/' ) );
 			exit;
@@ -189,7 +194,7 @@ final class HMN_CRM_Core {
 
 	/** Avoid exposing WordPress navigation links in the CRM shell, even briefly. */
 	public function hide_operator_portal_links() {
-		?><style>.hmn-portal .hmn-nav a[href*="/wp-admin/"],.hmn-portal .hmn-nav a[href*="section=scheduling"]{display:none!important}</style><?php
+		?><style>.hmn-portal .hmn-nav a[href*="/wp-admin/"]{display:none!important}</style><?php
 	}
 
 	public function redirect_operator_after_wp_login( $redirect_to, $requested_redirect_to, $user ) {
@@ -201,10 +206,11 @@ final class HMN_CRM_Core {
 	public function render_portal_navigation_enhancements() {
 		$settings_url = add_query_arg( 'section', 'scheduling', home_url( '/hcrm/' ) );
 		$hide_scheduling = ! self::can( self::CAP_MANAGE_SCHEDULING );
+		$show_settings = self::can( self::CAP_MANAGE_SETTINGS );
 		$hide_wp_admin = ! current_user_can( 'manage_options' );
 		?>
 		<style>.hmn-portal .hmn-nav-child{margin:-4px 0 2px 18px!important;padding:9px 12px!important;font-size:12px;color:#bfc8df!important}.hmn-portal .hmn-nav-child span{font-size:12px}.hmn-portal .hmn-nav-child:hover,.hmn-portal .hmn-nav-child.is-active{color:#fff!important}</style>
-		<script>(function(){var navs=document.querySelectorAll('.hmn-portal .hmn-nav'),url=<?php echo wp_json_encode( $settings_url ); ?>,hideScheduling=<?php echo wp_json_encode( $hide_scheduling ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>;navs.forEach(function(nav){if(hideWpAdmin)nav.querySelectorAll('a[href*="/wp-admin/"]').forEach(function(link){link.remove()});var link=nav.querySelector('a[href*="section=scheduling"]'),parent=nav.querySelector('a');if(hideScheduling){if(link)link.remove();return}if(link){link.classList.add('hmn-nav-child');return}if(!parent)return;link=document.createElement('a');link.href=url;link.className='hmn-nav-child';link.innerHTML='<span>⚙</span> تنظیمات نوبت‌دهی';parent.insertAdjacentElement('afterend',link)})})();</script>
+		<script>(function(){var navs=document.querySelectorAll('.hmn-portal .hmn-nav'),url=<?php echo wp_json_encode( $settings_url ); ?>,settingsUrl=<?php echo wp_json_encode( add_query_arg( 'section', 'settings', home_url( '/hcrm/' ) ) ); ?>,hideScheduling=<?php echo wp_json_encode( $hide_scheduling ); ?>,showSettings=<?php echo wp_json_encode( $show_settings ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>;navs.forEach(function(nav){if(hideWpAdmin)nav.querySelectorAll('a[href*="/wp-admin/"]').forEach(function(link){link.remove()});var link=nav.querySelector('a[href*="section=scheduling"]'),parent=nav.querySelector('a');if(hideScheduling){if(link)link.remove()}else if(link){link.classList.add('hmn-nav-child')}else if(parent){link=document.createElement('a');link.href=url;link.className='hmn-nav-child';link.innerHTML='<span>⚙</span> تنظیمات نوبت‌دهی';parent.insertAdjacentElement('afterend',link)}if(showSettings&&!nav.querySelector('a[href*="section=settings"]')&&parent){var settings=document.createElement('a');settings.href=settingsUrl;settings.innerHTML='<span>⚙</span> تنظیمات CRM';parent.insertAdjacentElement('afterend',settings)}})})();</script>
 		<?php
 	}
 
