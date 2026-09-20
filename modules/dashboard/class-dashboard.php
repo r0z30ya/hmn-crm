@@ -13,6 +13,7 @@ final class HMN_CRM_Dashboard {
 
 	/** Render the entire /hcrm portal. */
 	public static function render_portal() {
+		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_APPOINTMENTS ) ) { wp_die( 'شما به بخش نوبت‌ها دسترسی ندارید.', 403 ); }
 		$view = isset( $_GET['view'] ) ? sanitize_key( wp_unslash( $_GET['view'] ) ) : 'daily';
 		$view = in_array( $view, array( 'daily', 'weekly', 'monthly' ), true ) ? $view : 'daily';
 		$date = isset( $_GET['date'] ) ? sanitize_text_field( wp_unslash( $_GET['date'] ) ) : wp_date( 'Y-m-d' );
@@ -21,8 +22,8 @@ final class HMN_CRM_Dashboard {
 		$calendar = self::calendar_data( $date, $appointments );
 		$user = wp_get_current_user();
 		$base = home_url( '/hcrm/' );
-		if ( isset( $_GET['section'] ) && 'customers' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Customers' ) ) { HMN_CRM_Customers::render_portal( $base, $user ); return; }
-		if ( isset( $_GET['section'] ) && 'scheduling' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Scheduling' ) ) { HMN_CRM_Scheduling::render_portal( $base, $user ); return; }
+		if ( isset( $_GET['section'] ) && 'customers' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Customers' ) ) { if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_CUSTOMERS ) ) { wp_die( 'شما به بخش مشتریان دسترسی ندارید.', 403 ); } HMN_CRM_Customers::render_portal( $base, $user ); return; }
+		if ( isset( $_GET['section'] ) && 'scheduling' === sanitize_key( wp_unslash( $_GET['section'] ) ) && class_exists( 'HMN_CRM_Scheduling' ) ) { if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SCHEDULING ) ) { wp_die( 'شما به تنظیمات نوبت‌دهی دسترسی ندارید.', 403 ); } HMN_CRM_Scheduling::render_portal( $base, $user ); return; }
 		?>
 <!doctype html>
 <html <?php language_attributes(); ?> dir="rtl">

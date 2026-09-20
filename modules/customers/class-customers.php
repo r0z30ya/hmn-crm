@@ -164,7 +164,7 @@ final class HMN_CRM_Customers implements HMN_CRM_Module_Interface {
 	}
 
 	private static function verify_operator_request() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) {
+		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_CUSTOMERS ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 );
 		}
 	}
