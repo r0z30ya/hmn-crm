@@ -4,6 +4,8 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class HMN_CRM_EasyAppointments {
 	const OPTION_NAME = 'hmn_crm_easyappointments_settings';
+	const CONNECTION_LOG_OPTION = 'hmn_crm_easyappointments_connection_log';
+	const CONNECTION_LOG_LIMIT = 100;
 	private static $instance = null;
 
 	public function __construct() {
@@ -28,16 +30,37 @@ final class HMN_CRM_EasyAppointments {
 	public static function settings() { $s = get_option( self::OPTION_NAME, array() ); return is_array( $s ) ? $s : array(); }
 	public static function configured() { $s = self::settings(); return ! empty( $s['base_url'] ) && ! empty( $s['api_key'] ); }
 
+	/** Return sanitized, capped diagnostics. API keys and request bodies are never logged. */
+	public static function connection_logs() {
+		$logs = get_option( self::CONNECTION_LOG_OPTION, array() );
+		return is_array( $logs ) ? array_values( $logs ) : array();
+	}
+
+	private static function log_connection( $method, $path, $status, $message, $duration_ms ) {
+		$logs = self::connection_logs();
+		array_unshift( $logs, array(
+			'time' => current_time( 'mysql' ),
+			'method' => sanitize_key( strtoupper( $method ) ),
+			'path' => sanitize_text_field( '/' . ltrim( (string) $path, '/' ) ),
+			'status' => absint( $status ),
+			'duration_ms' => max( 0, absint( $duration_ms ) ),
+			'message' => sanitize_text_field( (string) $message ),
+		) );
+		update_option( self::CONNECTION_LOG_OPTION, array_slice( $logs, 0, self::CONNECTION_LOG_LIMIT ), false );
+	}
+
 	/** Authenticated Easy!Appointments API request. */
 	public static function request( $method, $path, $body = null, $query = array() ) {
+		$started = microtime( true );
 		$s = self::settings(); $base = isset( $s['base_url'] ) ? untrailingslashit( esc_url_raw( $s['base_url'] ) ) : ''; $key = isset( $s['api_key'] ) && is_scalar( $s['api_key'] ) ? trim( (string) $s['api_key'] ) : '';
-		if ( ! $base || ! $key ) { return new WP_Error( 'hmn_ea_not_configured', 'اتصال Easy!Appointments هنوز پیکربندی نشده است.' ); }
+		if ( ! $base || ! $key ) { $message = 'اتصال Easy!Appointments هنوز پیکربندی نشده است.'; self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_not_configured', $message ); }
 		$url = $base . '/index.php/api/v1/' . ltrim( $path, '/' ); if ( $query ) { $url = add_query_arg( $query, $url ); }
 		$args = array( 'method' => strtoupper( $method ), 'timeout' => 20, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
 		if ( null !== $body ) { $args['headers']['Content-Type'] = 'application/json; charset=utf-8'; $args['body'] = wp_json_encode( $body ); }
-		$r = wp_remote_request( $url, $args ); if ( is_wp_error( $r ) ) { return new WP_Error( 'hmn_ea_unreachable', 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $r->get_error_message() ); }
+		$r = wp_remote_request( $url, $args ); if ( is_wp_error( $r ) ) { $message = 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $r->get_error_message(); self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_unreachable', $message ); }
 		$status = (int) wp_remote_retrieve_response_code( $r ); $raw = (string) wp_remote_retrieve_body( $r ); $data = '' === $raw ? array() : json_decode( $raw, true );
-		if ( $status < 200 || $status >= 300 || ( '' !== $raw && ! is_array( $data ) ) ) { $message = is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'پاسخ ناموفق از موتور نوبت‌دهی دریافت شد.'; return new WP_Error( 'hmn_ea_api_error', sanitize_text_field( $message ), array( 'status' => $status ) ); }
+		if ( $status < 200 || $status >= 300 || ( '' !== $raw && ! is_array( $data ) ) ) { $message = is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'پاسخ ناموفق از موتور نوبت‌دهی دریافت شد.'; self::log_connection( $method, $path, $status, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_api_error', sanitize_text_field( $message ), array( 'status' => $status ) ); }
+		self::log_connection( $method, $path, $status, 'اتصال موفق', ( microtime( true ) - $started ) * 1000 );
 		return $data;
 	}
 

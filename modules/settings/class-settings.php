@@ -6,6 +6,7 @@ final class HMN_CRM_Settings implements HMN_CRM_Module_Interface {
 	public function __construct() { $this->boot(); }
 	public function boot() {
 		add_action( 'wp_ajax_hmn_crm_settings_save', array( $this, 'save_ajax' ) );
+		add_action( 'wp_ajax_hmn_crm_settings_test_ea', array( $this, 'test_ea_ajax' ) );
 	}
 
 	public static function render_portal( $base, $user ) {
@@ -19,7 +20,7 @@ final class HMN_CRM_Settings implements HMN_CRM_Module_Interface {
 		/* Providers belong to Easy!Appointments; CRM staff must not create provider logins. */
 		add_action( 'wp_head', static function() { echo '<style>form[data-hmn-settings="provider"]{display:none!important}</style>'; }, 100 );
 		add_action( 'wp_footer', static function() use ( $providers_url ) { ?>
-			<script>(function(){var form=document.querySelector('form[data-hmn-settings="provider"]');if(!form)return;var card=form.closest('.hmn-settings-card'),note=card&&card.querySelector('p');if(note)note.textContent='فهرست پزشکان از موتور نوبت‌دهی خوانده می‌شود؛ پزشک حساب ورود CRM ندارد.';if(card&&<?php echo wp_json_encode( $providers_url ); ?>){var link=document.createElement('a');link.className='hmn-settings-save';link.href=<?php echo wp_json_encode( $providers_url ); ?>;link.target='_blank';link.rel='noopener';link.textContent='مدیریت پزشکان در Easy!Appointments';card.insertBefore(link,form.nextSibling);}})();</script>
+			<script>(function(){var form=document.querySelector('form[data-hmn-settings="provider"]'),card=form&&form.closest('.hmn-settings-card'),note=card&&card.querySelector('p');if(note)note.textContent='فهرست پزشکان از موتور نوبت‌دهی خوانده می‌شود؛ پزشک حساب ورود CRM ندارد.';if(card&&<?php echo wp_json_encode( $providers_url ); ?>){var link=document.createElement('a');link.className='hmn-settings-save';link.href=<?php echo wp_json_encode( $providers_url ); ?>;link.target='_blank';link.rel='noopener';link.textContent='مدیریت پزشکان در Easy!Appointments';card.insertBefore(link,form.nextSibling)}var ea=document.querySelector('form[data-hmn-settings="ea"]');if(!ea)return;var button=document.createElement('button'),message=ea.querySelector('.hmn-settings-message');button.type='button';button.className='hmn-settings-save';button.textContent='تست اتصال EA';button.style.marginRight='8px';button.onclick=function(){button.disabled=true;message.className='hmn-settings-message';message.textContent='در حال بررسی اتصال…';fetch(<?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({action:'hmn_crm_settings_test_ea',nonce:<?php echo wp_json_encode( wp_create_nonce( 'hmn_crm_settings' ) ); ?>})}).then(function(r){return r.json()}).then(function(r){if(!r.success)throw Error(r.data&&r.data.message||'خطای نامشخص');message.textContent=r.data.message}).catch(function(e){message.className='hmn-settings-message error';message.textContent=e.message}).finally(function(){button.disabled=false})};ea.querySelector('.hmn-settings-save').insertAdjacentElement('afterend',button)})();</script>
 		<?php }, 5 );
 		?>
 <!doctype html><html <?php language_attributes(); ?> dir="rtl"><head><meta charset="<?php bloginfo( 'charset' ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تنظیمات CRM</title><?php wp_head(); ?><style><?php HMN_CRM_Dashboard::portal_styles(); ?>.hmn-settings{display:grid;gap:20px}.hmn-settings-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px}.hmn-settings-card h2{margin:0 0 7px;font-size:19px}.hmn-settings-card p{color:var(--muted);margin:0 0 18px}.hmn-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.hmn-settings-grid label{display:grid;gap:6px;font-weight:700}.hmn-settings-grid input,.hmn-settings-grid textarea,.hmn-settings-grid select{min-height:42px;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font:inherit;background:var(--surface);color:var(--ink)}.hmn-settings-grid textarea{min-height:90px}.hmn-settings-grid .full{grid-column:1/-1}.hmn-settings-save{margin-top:16px;border:0;border-radius:8px;padding:11px 18px;background:var(--brand);color:#fff;font:inherit;font-weight:700;cursor:pointer}.hmn-settings-message{margin-top:12px;min-height:20px;color:#027a48}.hmn-settings-message.error{color:#b42318}.hmn-settings-table{width:100%;border-collapse:collapse}.hmn-settings-table th,.hmn-settings-table td{padding:11px;text-align:right;border-bottom:1px solid var(--line)}.hmn-settings-table th{color:var(--muted);font-size:12px}.hmn-checks{display:flex;flex-wrap:wrap;gap:9px}.hmn-checks label{display:flex;align-items:center;gap:5px;font-weight:400}@media(max-width:650px){.hmn-settings-grid{grid-template-columns:1fr}.hmn-settings-grid .full{grid-column:auto}}</style></head><body class="hmn-portal-body"><div class="hmn-portal"><aside class="hmn-sidebar"><div class="hmn-brand"><span class="hmn-brand-mark">H</span><span>HMN CRM</span></div><nav class="hmn-nav"><a href="<?php echo esc_url( $base ); ?>">⌂ داشبورد نوبت‌ها</a><a href="<?php echo esc_url( add_query_arg( 'section', 'customers', $base ) ); ?>">♙ مشتریان</a><a href="<?php echo esc_url( add_query_arg( 'section', 'scheduling', $base ) ); ?>">⚙ تنظیمات نوبت‌دهی</a><a class="is-active" href="<?php echo esc_url( add_query_arg( 'section', 'settings', $base ) ); ?>">⚙ تنظیمات CRM</a></nav><div class="hmn-user"><span class="hmn-avatar"><?php echo esc_html( mb_substr( $user->display_name ?: $user->user_login, 0, 1 ) ); ?></span><div><strong><?php echo esc_html( $user->display_name ); ?></strong><a href="<?php echo esc_url( wp_logout_url( $base ) ); ?>">خروج از حساب</a></div></div></aside><main class="hmn-main"><header class="hmn-topbar"><div><p class="hmn-eyebrow">تنظیمات سامانه</p><h1>تنظیمات CRM</h1></div><a class="hmn-today" href="<?php echo esc_url( $base ); ?>">بازگشت به نوبت‌ها</a></header><div class="hmn-settings">
@@ -38,6 +39,20 @@ final class HMN_CRM_Settings implements HMN_CRM_Module_Interface {
 		if ( 'sms' === $kind ) { $this->save_sms(); }
 		if ( 'ea' === $kind ) { $this->save_ea(); }
 		wp_send_json_error( array( 'message' => 'درخواست نامعتبر است.' ), 400 );
+	}
+
+	/** Read-only health check: never changes EA data or exposes the API key. */
+	public function test_ea_ajax() {
+		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_SETTINGS ) || ! check_ajax_referer( 'hmn_crm_settings', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); }
+		$result = HMN_CRM_EasyAppointments::request( 'GET', 'providers', null, array( 'length' => 1 ) );
+		if ( is_wp_error( $result ) ) {
+			$status = (int) ( $result->get_error_data()['status'] ?? 0 );
+			$message = $result->get_error_message();
+			if ( 401 === $status || 403 === $status ) { $message = 'EA کلید API را نپذیرفت (HTTP ' . $status . '). کلید API را در EA بررسی کنید.'; }
+			elseif ( $status ) { $message = 'EA پاسخ خطا داد (HTTP ' . $status . '): ' . $message; }
+			wp_send_json_error( array( 'message' => $message ), 502 );
+		}
+		wp_send_json_success( array( 'message' => 'اتصال EA برقرار است.' ) );
 	}
 
 	private function save_service() {

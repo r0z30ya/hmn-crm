@@ -69,6 +69,7 @@ final class HMN_CRM_Dashboard {
 	</main>
 </div>
 <script>(function(){var portal=document.querySelector('.hmn-portal'),menu=document.querySelector('.hmn-menu'),sidebar=document.querySelector('.hmn-sidebar'),toggle=document.querySelector('.hmn-theme-toggle'),settings=document.querySelector('.hmn-settings-placeholder'),book=document.querySelector('.hmn-topbar .hmn-new-booking'),panel=document.querySelector('.hmn-operator-panel'),saved=localStorage.getItem('hmn-crm-theme');if(saved==='dark')document.body.classList.add('hmn-dark');if(menu)menu.addEventListener('click',function(e){e.stopPropagation();portal.classList.toggle('menu-open')});document.addEventListener('click',function(e){if(portal.classList.contains('menu-open')&&sidebar&&!sidebar.contains(e.target)&&(!menu||!menu.contains(e.target)))portal.classList.remove('menu-open')});if(book&&panel)book.addEventListener('click',function(){panel.hidden=false});if(toggle)toggle.addEventListener('click',function(){document.body.classList.toggle('hmn-dark');var dark=document.body.classList.contains('hmn-dark');localStorage.setItem('hmn-crm-theme',dark?'dark':'light');toggle.setAttribute('aria-label',dark?'فعال‌سازی حالت روشن':'فعال‌سازی حالت تیره')});if(settings)settings.addEventListener('click',function(){settings.blur()})})();</script>
+<script>(function(){var panel=document.querySelector('.hmn-operator-panel'),button=document.querySelector('.hmn-topbar .hmn-new-booking');if(panel&&button){button.onclick=function(){panel.hidden=false}}var localIso=function(){var y=this.getFullYear(),m=String(this.getMonth()+1).padStart(2,'0'),d=String(this.getDate()).padStart(2,'0');return y+'-'+m+'-'+d+'T00:00:00.000Z'};Date.prototype.toISOString=localIso})();</script>
 <?php wp_footer(); ?>
 </body></html>
 		<?php if ( false ) : ?>
@@ -181,8 +182,24 @@ final class HMN_CRM_Dashboard {
 	private static function appointment_value( $item, $keys, $fallback = '' ) { foreach ( $keys as $key ) { if ( isset( $item[ $key ] ) && is_scalar( $item[ $key ] ) && '' !== (string) $item[ $key ] ) return (string) $item[ $key ]; } return $fallback; }
 	private static function patient_name( $item ) { $name = self::appointment_value( $item, array( 'field_name', 'name', 'user_name', 'first_name' ) ); $last = self::appointment_value( $item, array( 'field_lname', 'last_name', 'family' ) ); return trim( $name . ' ' . $last ) ?: 'مراجع بدون نام'; }
 
-	/** Gregorian to Jalali, adapted for display-only local dates. */
-	private static function jalali_date( $date, $format = 'Y/m/d' ) { $time = strtotime( $date ); $gy = (int) wp_date( 'Y', $time ); $gm = (int) wp_date( 'n', $time ); $gd = (int) wp_date( 'j', $time ); $gdm = array( 0,31,59,90,120,151,181,212,243,273,304,334 ); $jy = $gy > 1600 ? 979 : 0; $gy -= $gy > 1600 ? 1600 : 621; $gy2 = $gm > 2 ? $gy + 1 : $gy; $days = 365 * $gy + (int) floor( ( $gy2 + 3 ) / 4 ) - (int) floor( ( $gy2 + 99 ) / 100 ) + (int) floor( ( $gy2 + 399 ) / 400 ) - 80 + $gd + $gdm[ $gm - 1 ]; $jy += 33 * (int) floor( $days / 12053 ); $days %= 12053; $jy += 4 * (int) floor( $days / 1461 ); $days %= 1461; if ( $days > 365 ) { $jy += (int) floor( ( $days - 1 ) / 365 ); $days = ( $days - 1 ) % 365; } $jm = $days < 186 ? 1 + (int) floor( $days / 31 ) : 7 + (int) floor( ( $days - 186 ) / 30 ); $jd = 1 + ( $days < 186 ? $days % 31 : ( $days - 186 ) % 30 ); $months = array( 1=>'فروردین',2=>'اردیبهشت',3=>'خرداد',4=>'تیر',5=>'مرداد',6=>'شهریور',7=>'مهر',8=>'آبان',9=>'آذر',10=>'دی',11=>'بهمن',12=>'اسفند' ); $weekdays = array( 'Saturday'=>'شنبه','Sunday'=>'یکشنبه','Monday'=>'دوشنبه','Tuesday'=>'سه‌شنبه','Wednesday'=>'چهارشنبه','Thursday'=>'پنجشنبه','Friday'=>'جمعه' ); $replacements = array( 'Y'=>$jy, 'm'=>str_pad( $jm, 2, '0', STR_PAD_LEFT ), 'd'=>str_pad( $jd, 2, '0', STR_PAD_LEFT ), 'j'=>$jd, 'F'=>$months[ $jm ], 'l'=>$weekdays[ wp_date( 'l', $time ) ] ); return strtr( $format, $replacements ); }
+	/** Gregorian-to-Jalali conversion used by the portal UI only. */
+	private static function jalali_date( $date, $format = 'Y/m/d' ) {
+		$local = DateTimeImmutable::createFromFormat( '!Y-m-d', substr( (string) $date, 0, 10 ), wp_timezone() );
+		if ( ! $local ) { return ''; }
+		$gy = (int) $local->format( 'Y' ); $gm = (int) $local->format( 'n' ); $gd = (int) $local->format( 'j' );
+		$gdm = array( 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 );
+		$jy = $gy > 1600 ? 979 : 0; $gy -= $gy > 1600 ? 1600 : 621; $gy2 = $gm > 2 ? $gy + 1 : $gy;
+		$days = 365 * $gy + (int) floor( ( $gy2 + 3 ) / 4 ) - (int) floor( ( $gy2 + 99 ) / 100 ) + (int) floor( ( $gy2 + 399 ) / 400 ) - 80 + $gd + $gdm[ $gm - 1 ];
+		$jy += 33 * (int) floor( $days / 12053 ); $days %= 12053; $jy += 4 * (int) floor( $days / 1461 ); $days %= 1461;
+		if ( $days > 365 ) { $jy += (int) floor( ( $days - 1 ) / 365 ); $days = ( $days - 1 ) % 365; }
+		$jm = $days < 186 ? 1 + (int) floor( $days / 31 ) : 7 + (int) floor( ( $days - 186 ) / 30 );
+		$jd = 1 + ( $days < 186 ? $days % 31 : ( $days - 186 ) % 30 );
+		$months = array( 1 => 'فروردین', 2 => 'اردیبهشت', 3 => 'خرداد', 4 => 'تیر', 5 => 'مرداد', 6 => 'شهریور', 7 => 'مهر', 8 => 'آبان', 9 => 'آذر', 10 => 'دی', 11 => 'بهمن', 12 => 'اسفند' );
+		$weekdays = array( 'Saturday' => 'شنبه', 'Sunday' => 'یکشنبه', 'Monday' => 'دوشنبه', 'Tuesday' => 'سه‌شنبه', 'Wednesday' => 'چهارشنبه', 'Thursday' => 'پنجشنبه', 'Friday' => 'جمعه' );
+		$tokens = array( 'Y' => sprintf( '%04d', $jy ), 'm' => sprintf( '%02d', $jm ), 'd' => sprintf( '%02d', $jd ), 'j' => (string) $jd, 'F' => $months[ $jm ], 'l' => $weekdays[ $local->format( 'l' ) ] );
+		$result = ''; for ( $i = 0, $length = strlen( $format ); $i < $length; $i++ ) { $char = $format[ $i ]; $result .= isset( $tokens[ $char ] ) ? $tokens[ $char ] : $char; }
+		return $result;
+	}
 
 	/** @deprecated Internal compatibility alias for the legacy customer renderer. */
 	private static function styles() { self::portal_styles(); }
