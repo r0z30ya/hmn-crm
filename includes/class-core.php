@@ -122,6 +122,15 @@ final class HMN_CRM_Core {
 		if ( ! get_query_var( 'hmn_crm_portal' ) && 'hcrm' !== $request_path ) {
 			return;
 		}
+		/* The custom route is rendered here, so WordPress must not retain its 404 status. */
+		global $wp_query;
+		if ( $wp_query instanceof WP_Query ) {
+			$wp_query->is_404 = false;
+			$wp_query->is_home = false;
+			$wp_query->is_page = true;
+		}
+		status_header( 200 );
+		nocache_headers();
 		if ( ! is_user_logged_in() ) {
 			if ( class_exists( 'HMN_CRM_Auth' ) ) { HMN_CRM_Auth::render_login(); }
 			else { $this->render_crm_login(); }
@@ -204,13 +213,33 @@ final class HMN_CRM_Core {
 
 	/** Keep the scheduling link nested beneath the dashboard in every CRM portal view. */
 	public function render_portal_navigation_enhancements() {
-		$settings_url = add_query_arg( 'section', 'scheduling', home_url( '/hcrm/' ) );
-		$hide_scheduling = ! self::can( self::CAP_MANAGE_SCHEDULING );
-		$show_settings = self::can( self::CAP_MANAGE_SETTINGS );
+		$appointments_url = home_url( '/hcrm/' );
+		$patients_url = add_query_arg( 'section', 'customers', $appointments_url );
+		$scheduling_url = add_query_arg( 'section', 'scheduling', $appointments_url );
+		$panel_url = add_query_arg( 'section', 'settings', $appointments_url );
+		$sms_url = $panel_url . '#hmn-sms-settings';
+		$show_scheduling = self::can( self::CAP_MANAGE_SCHEDULING );
+		$show_panel_settings = self::can( self::CAP_MANAGE_SETTINGS );
 		$hide_wp_admin = ! current_user_can( 'manage_options' );
 		?>
-		<style>.hmn-portal .hmn-nav-child{margin:-4px 0 2px 18px!important;padding:9px 12px!important;font-size:12px;color:#bfc8df!important}.hmn-portal .hmn-nav-child span{font-size:12px}.hmn-portal .hmn-nav-child:hover,.hmn-portal .hmn-nav-child.is-active{color:#fff!important}</style>
-		<script>(function(){var navs=document.querySelectorAll('.hmn-portal .hmn-nav'),url=<?php echo wp_json_encode( $settings_url ); ?>,settingsUrl=<?php echo wp_json_encode( add_query_arg( 'section', 'settings', home_url( '/hcrm/' ) ) ); ?>,hideScheduling=<?php echo wp_json_encode( $hide_scheduling ); ?>,showSettings=<?php echo wp_json_encode( $show_settings ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>;navs.forEach(function(nav){if(hideWpAdmin)nav.querySelectorAll('a[href*="/wp-admin/"]').forEach(function(link){link.remove()});var link=nav.querySelector('a[href*="section=scheduling"]'),parent=nav.querySelector('a');if(hideScheduling){if(link)link.remove()}else if(link){link.classList.add('hmn-nav-child')}else if(parent){link=document.createElement('a');link.href=url;link.className='hmn-nav-child';link.innerHTML='<span>⚙</span> تنظیمات نوبت‌دهی';parent.insertAdjacentElement('afterend',link)}if(showSettings&&!nav.querySelector('a[href*="section=settings"]')&&parent){var settings=document.createElement('a');settings.href=settingsUrl;settings.innerHTML='<span>⚙</span> تنظیمات CRM';parent.insertAdjacentElement('afterend',settings)}})})();</script>
+		<style>
+			.hmn-nav{gap:5px!important}.hmn-nav-parent{width:100%;border:0;background:transparent;color:inherit;border-radius:10px;padding:13px 12px;font:inherit;text-align:right;cursor:pointer;display:flex;align-items:center;justify-content:space-between}.hmn-nav-parent:hover,.hmn-nav-parent.is-open{background:#2a3150;color:#fff}.hmn-nav-parent .hmn-nav-arrow{transition:transform .18s}.hmn-nav-parent.is-open .hmn-nav-arrow{transform:rotate(180deg)}.hmn-nav-group{display:none;margin:0 12px 4px;border-right:1px solid #46506f;padding-right:8px}.hmn-nav-group.is-open{display:grid;gap:3px}.hmn-nav-group a{padding:9px 10px!important;font-size:12px!important;color:#bfc8df!important}.hmn-nav-group a.is-active,.hmn-nav-group a:hover{color:#fff!important;background:#2a3150}.hmn-brand{font-size:18px!important}
+		</style>
+		<script>(function(){
+			var urls={appointments:<?php echo wp_json_encode( $appointments_url ); ?>,patients:<?php echo wp_json_encode( $patients_url ); ?>,scheduling:<?php echo wp_json_encode( $scheduling_url ); ?>,panel:<?php echo wp_json_encode( $panel_url ); ?>,sms:<?php echo wp_json_encode( $sms_url ); ?>},canSchedule=<?php echo wp_json_encode( $show_scheduling ); ?>,canPanel=<?php echo wp_json_encode( $show_panel_settings ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>,current=location.href;
+			document.querySelectorAll('.hmn-brand').forEach(function(brand){brand.innerHTML='<span class="hmn-brand-mark">H</span><span>پنل هومانا</span>'});
+			document.querySelectorAll('.hmn-portal .hmn-nav').forEach(function(nav){
+				var items='<a data-nav="appointments" href="'+urls.appointments+'"><span>⌂</span> نوبت‌ها</a><a data-nav="patients" href="'+urls.patients+'"><span>♙</span> بیماران</a>';
+				if(canSchedule||canPanel){items+='<button type="button" class="hmn-nav-parent" aria-expanded="false"><span><span>⚙</span> تنظیمات</span><span class="hmn-nav-arrow">⌄</span></button><div class="hmn-nav-group">';
+					if(canSchedule)items+='<a data-nav="scheduling" href="'+urls.scheduling+'">تنظیمات نوبت‌دهی</a>';
+					if(canPanel){items+='<a data-nav="panel" href="'+urls.panel+'">تنظیمات پنل</a><a data-nav="sms" href="'+urls.sms+'">تنظیمات پیامک</a>';}
+				items+='</div>';}
+				nav.innerHTML=items;
+				var active=current.indexOf('section=customers')>-1?'patients':current.indexOf('section=scheduling')>-1?'scheduling':location.hash==='#hmn-sms-settings'?'sms':current.indexOf('section=settings')>-1?'panel':'appointments';
+				var link=nav.querySelector('[data-nav="'+active+'"]');if(link)link.classList.add('is-active');
+				var parent=nav.querySelector('.hmn-nav-parent'),group=nav.querySelector('.hmn-nav-group');if(parent&&group){var open=active==='scheduling'||active==='panel';parent.classList.toggle('is-open',open);group.classList.toggle('is-open',open);parent.setAttribute('aria-expanded',open?'true':'false');parent.onclick=function(){var next=!group.classList.contains('is-open');group.classList.toggle('is-open',next);parent.classList.toggle('is-open',next);parent.setAttribute('aria-expanded',next?'true':'false')}}
+			});
+		})();</script>
 		<?php
 	}
 

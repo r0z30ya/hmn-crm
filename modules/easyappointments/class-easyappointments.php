@@ -6,6 +6,7 @@ final class HMN_CRM_EasyAppointments {
 	const OPTION_NAME = 'hmn_crm_easyappointments_settings';
 	const CONNECTION_LOG_OPTION = 'hmn_crm_easyappointments_connection_log';
 	const CONNECTION_LOG_LIMIT = 100;
+	const CACHE_VERSION_OPTION = 'hmn_crm_easyappointments_cache_version';
 	private static $instance = null;
 
 	public function __construct() {
@@ -53,19 +54,36 @@ final class HMN_CRM_EasyAppointments {
 	public static function request( $method, $path, $body = null, $query = array() ) {
 		$started = microtime( true );
 		$s = self::settings(); $base = isset( $s['base_url'] ) ? untrailingslashit( esc_url_raw( $s['base_url'] ) ) : ''; $key = isset( $s['api_key'] ) && is_scalar( $s['api_key'] ) ? trim( (string) $s['api_key'] ) : '';
-		if ( ! $base || ! $key ) { $message = 'اتصال Easy!Appointments هنوز پیکربندی نشده است.'; self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_not_configured', $message ); }
+		if ( ! $base || ! $key ) { $message = 'اتصال موتور نوبت‌دهی هنوز پیکربندی نشده است.'; self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_not_configured', $message ); }
+		$method = strtoupper( $method );
+		$cache_key = '';
+		if ( 'GET' === $method && self::cache_ttl( $path ) ) {
+			$cache_key = 'hmn_ea_' . md5( absint( get_option( self::CACHE_VERSION_OPTION, 1 ) ) . '|' . $base . '|' . $path . '|' . wp_json_encode( $query ) );
+			$cached = get_transient( $cache_key );
+			if ( false !== $cached ) { return $cached; }
+		}
 		$url = $base . '/index.php/api/v1/' . ltrim( $path, '/' ); if ( $query ) { $url = add_query_arg( $query, $url ); }
-		$args = array( 'method' => strtoupper( $method ), 'timeout' => 20, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
+		$args = array( 'method' => $method, 'timeout' => 12, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
 		if ( null !== $body ) { $args['headers']['Content-Type'] = 'application/json; charset=utf-8'; $args['body'] = wp_json_encode( $body ); }
 		$r = wp_remote_request( $url, $args ); if ( is_wp_error( $r ) ) { $message = 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $r->get_error_message(); self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_unreachable', $message ); }
 		$status = (int) wp_remote_retrieve_response_code( $r ); $raw = (string) wp_remote_retrieve_body( $r ); $data = '' === $raw ? array() : json_decode( $raw, true );
 		if ( $status < 200 || $status >= 300 || ( '' !== $raw && ! is_array( $data ) ) ) { $message = is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'پاسخ ناموفق از موتور نوبت‌دهی دریافت شد.'; self::log_connection( $method, $path, $status, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_api_error', sanitize_text_field( $message ), array( 'status' => $status ) ); }
 		self::log_connection( $method, $path, $status, 'اتصال موفق', ( microtime( true ) - $started ) * 1000 );
+		if ( $cache_key ) { set_transient( $cache_key, $data, self::cache_ttl( $path ) ); }
+		if ( 'GET' !== $method ) { update_option( self::CACHE_VERSION_OPTION, absint( get_option( self::CACHE_VERSION_OPTION, 1 ) ) + 1, false ); }
 		return $data;
 	}
 
+	/** Cache only small, read-only catalogue data used repeatedly by the CRM shell. */
+	private static function cache_ttl( $path ) {
+		$path = trim( (string) $path, '/' );
+		if ( 'providers' === $path || 'services' === $path ) { return 5 * MINUTE_IN_SECONDS; }
+		if ( 'appointments' === $path ) { return 30; }
+		return 0;
+	}
+
 	public function render_shortcode() {
-		if ( ! self::configured() ) { return current_user_can( 'manage_options' ) ? '<p>ابتدا اتصال Easy!Appointments را از HMN CRM ← موتور نوبت‌دهی پیکربندی کنید.</p>' : ''; }
+		if ( ! self::configured() ) { return current_user_can( 'manage_options' ) ? '<p>ابتدا اتصال موتور نوبت‌دهی را از پنل هومانا پیکربندی کنید.</p>' : ''; }
 		$s = self::settings(); $show_provider = empty( $s['hide_provider'] ); ob_start(); ?>
 <form class="hmn-ea-form" dir="rtl" novalidate>
  <div class="hmn-ea-steps"><span class="is-active">۱. مشخصات</span><i></i><span>۲. نوبت</span><i></i><span>۳. تأیید</span></div>
