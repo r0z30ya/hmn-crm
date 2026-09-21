@@ -55,6 +55,12 @@ final class HMN_CRM_EasyAppointments {
 		$started = microtime( true );
 		$s = self::settings(); $base = isset( $s['base_url'] ) ? untrailingslashit( esc_url_raw( $s['base_url'] ) ) : ''; $key = isset( $s['api_key'] ) && is_scalar( $s['api_key'] ) ? trim( (string) $s['api_key'] ) : '';
 		if ( ! $base || ! $key ) { $message = 'اتصال موتور نوبت‌دهی هنوز پیکربندی نشده است.'; self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_not_configured', $message ); }
+		$failure_key = 'hmn_ea_connection_failure_' . md5( $base );
+		if ( get_transient( $failure_key ) ) {
+			$message = 'موتور نوبت‌دهی موقتاً در دسترس نیست؛ لطفاً چند لحظه دیگر دوباره تلاش کنید.';
+			self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 );
+			return new WP_Error( 'hmn_ea_temporarily_unavailable', $message, array( 'status' => 503 ) );
+		}
 		$method = strtoupper( $method );
 		$cache_key = '';
 		if ( 'GET' === $method && self::cache_ttl( $path ) ) {
@@ -63,11 +69,12 @@ final class HMN_CRM_EasyAppointments {
 			if ( false !== $cached ) { return $cached; }
 		}
 		$url = $base . '/index.php/api/v1/' . ltrim( $path, '/' ); if ( $query ) { $url = add_query_arg( $query, $url ); }
-		$args = array( 'method' => $method, 'timeout' => 12, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
+		$args = array( 'method' => $method, 'timeout' => 5, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
 		if ( null !== $body ) { $args['headers']['Content-Type'] = 'application/json; charset=utf-8'; $args['body'] = wp_json_encode( $body ); }
-		$r = wp_remote_request( $url, $args ); if ( is_wp_error( $r ) ) { $message = 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $r->get_error_message(); self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_unreachable', $message ); }
+		$r = wp_remote_request( $url, $args ); if ( is_wp_error( $r ) ) { $message = 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $r->get_error_message(); set_transient( $failure_key, 1, 30 ); self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_unreachable', $message ); }
 		$status = (int) wp_remote_retrieve_response_code( $r ); $raw = (string) wp_remote_retrieve_body( $r ); $data = '' === $raw ? array() : json_decode( $raw, true );
 		if ( $status < 200 || $status >= 300 || ( '' !== $raw && ! is_array( $data ) ) ) { $message = is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'پاسخ ناموفق از موتور نوبت‌دهی دریافت شد.'; self::log_connection( $method, $path, $status, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_api_error', sanitize_text_field( $message ), array( 'status' => $status ) ); }
+		delete_transient( $failure_key );
 		self::log_connection( $method, $path, $status, 'اتصال موفق', ( microtime( true ) - $started ) * 1000 );
 		if ( $cache_key ) { set_transient( $cache_key, $data, self::cache_ttl( $path ) ); }
 		if ( 'GET' !== $method ) { update_option( self::CACHE_VERSION_OPTION, absint( get_option( self::CACHE_VERSION_OPTION, 1 ) ) + 1, false ); }
