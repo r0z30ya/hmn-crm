@@ -8,12 +8,61 @@ final class HMN_CRM_SMS_Settings {
 	const PAGE_SLUG = 'hmn-crm-sms';
 	private static $instance;
 
-	/** Register hooks. */
-	public function __construct() {
-		self::$instance = $this;
-		add_action( 'admin_init', array( $this, 'register_settings' ) );
-		add_action( 'admin_post_hmn_crm_sms_test', array( $this, 'handle_test' ) );
-	}
+	/** Register hooks. */		public function __construct() {
+			self::$instance = $this;
+			add_action( 'admin_init', array( $this, 'register_settings' ) );
+			add_action( 'admin_post_hmn_crm_sms_test', array( $this, 'handle_test' ) );
+			add_action( 'wp_ajax_hmn_crm_sms_credit', array( $this, 'credit_ajax' ) );
+			add_action( 'wp_ajax_hmn_crm_sms_log', array( $this, 'log_ajax' ) );
+			add_action( 'hmn_crm_migrate', array( 'HMN_CRM_SMS', 'install' ) );
+		}
+
+		/** Portal status dot refresh (cached server-side; force=1 bypasses). */
+		public function credit_ajax() {
+			if ( ! check_ajax_referer( 'hmn_crm_sms_credit', 'nonce', false ) || ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_ACCESS ) ) {
+				wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 );
+			}
+			$status = HMN_CRM_SMS::credit_status( ! empty( $_POST['force'] ) );
+			wp_send_json_success( $status );
+		}
+
+		/** Portal delivery log: last sends plus their live Melipayamak delivery state. */
+		public function log_ajax() {
+			if ( ! check_ajax_referer( 'hmn_crm_sms_log', 'nonce', false ) || ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_ACCESS ) ) {
+				wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 );
+			}
+			$rows    = HMN_CRM_SMS::recent_logs( 30 );
+			$rec_ids = array();
+			foreach ( $rows as $row ) { if ( ! empty( $row['rec_id'] ) ) { $rec_ids[] = absint( $row['rec_id'] ); } }
+			/* One batched status call for the whole page; delivery_statuses() caches results for 30 minutes. */
+			$states = $rec_ids ? HMN_CRM_SMS::delivery_statuses( $rec_ids ) : array();
+			$out    = array();
+			foreach ( $rows as $row ) {
+				$rec_id = absint( $row['rec_id'] ?? 0 );
+				if ( $rec_id && isset( $states[ $rec_id ] ) ) { $state = $states[ $rec_id ]; }
+				elseif ( 'failed' === ( $row['status'] ?? '' ) ) { $state = 'failed'; }
+				elseif ( $rec_id ) { $state = 'pending'; }
+				else { $state = 'no-receipt'; }
+				$when = (string) ( $row['created_at'] ?? '' );
+				$out[] = array(
+					'phone'      => (string) ( $row['phone'] ?? '' ),
+					'type_label' => self::type_label( $row['message_type'] ?? '' ),
+					'rec_id'     => $rec_id,
+					'state'      => $state,
+					'error'      => (string) ( $row['error'] ?? '' ),
+					'date'       => ( class_exists( 'HMN_CRM_Dashboard' ) && '' !== $when ) ? HMN_CRM_Dashboard::hmn_public_jalali( $when ) : substr( $when, 0, 10 ),
+					'time'       => substr( $when, 11, 5 ),
+				);
+			}
+			wp_send_json_success( array( 'logs' => $out, 'count' => count( $out ) ) );
+		}
+
+		/** Human label for a logged message type. */
+		private static function type_label( $type ) {
+			$labels = array( 'booking' => 'ثبت نوبت', 'cancel' => 'لغو نوبت', 'edit' => 'ویرایش نوبت', 'reminder' => 'یادآوری نوبت', 'otp' => 'کد تأیید', 'advanced' => 'متن آزاد', 'pattern' => 'الگو' );
+			$type = is_scalar( $type ) ? (string) $type : '';
+			return isset( $labels[ $type ] ) ? $labels[ $type ] : 'الگو';
+		}
 
 	/** Render callback. */
 	public static function render_page() { if ( self::$instance ) { self::$instance->render(); } }

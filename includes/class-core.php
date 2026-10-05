@@ -22,6 +22,7 @@ final class HMN_CRM_Core {
 	const CAP_MANAGE_CUSTOMERS = 'hmn_crm_manage_customers';
 	const CAP_MANAGE_SCHEDULING = 'hmn_crm_manage_scheduling';
 	const CAP_MANAGE_SETTINGS = 'hmn_crm_manage_settings';
+	const CAP_MANAGE_ACCOUNTING = 'hmn_crm_manage_accounting';
 
 	/**
 	 * Singleton instance.
@@ -60,6 +61,7 @@ final class HMN_CRM_Core {
 			self::CAP_ACCESS => true,
 			self::CAP_MANAGE_APPOINTMENTS => true,
 			self::CAP_MANAGE_CUSTOMERS => true,
+			self::CAP_MANAGE_ACCOUNTING => true,
 		);
 		$role = get_role( self::ROLE_OPERATOR );
 		if ( ! $role ) {
@@ -131,6 +133,8 @@ final class HMN_CRM_Core {
 		}
 		status_header( 200 );
 		nocache_headers();
+		/* The portal renders its own complete stylesheet; the theme/plugin head stack only fights with it. */
+		$this->strip_portal_theme_head();
 		if ( ! is_user_logged_in() ) {
 			if ( class_exists( 'HMN_CRM_Auth' ) ) { HMN_CRM_Auth::render_login(); }
 			else { $this->render_crm_login(); }
@@ -147,6 +151,29 @@ final class HMN_CRM_Core {
 			exit;
 		}
 		wp_die( esc_html__( 'ماژول پنل نوبت‌ها بارگذاری نشد.', 'hmn-crm' ), 500 );
+	}
+
+	/** The portal ships its own complete inline stylesheet; the theme stack only conflicts with it. */
+	public function strip_portal_theme_head() {
+		remove_all_actions( 'wp_enqueue_scripts' );
+		remove_all_actions( 'wp_head' );
+		/* Keep wp_footer hooks the CRM itself registered; drop everything the theme/plugins added. */
+		add_action( 'wp_footer', function() {
+			global $wp_filter;
+			$keep = array(
+				'render_portal_navigation_enhancements',
+				'hmn_crm_settings_modalize',
+				'hmn_crm_scheduling_note',
+			);
+			foreach ( $wp_filter['wp_footer']->callbacks ?? array() as $priority => $hooks ) {
+				foreach ( $hooks as $id => $hook ) {
+					$function = $hook['function'];
+					$name = is_string( $function ) ? $function : ( is_array( $function ) && is_string( $function[1] ) ? $function[1] : '' );
+					$allowed = in_array( $name, $keep, true ) || ( $function instanceof Closure );
+					if ( ! $allowed ) { remove_action( 'wp_footer', $function, $priority ); }
+				}
+			}
+		}, -999999 );
 	}
 
 	/** Open the custom staff portal from the WordPress menu. */
@@ -167,8 +194,14 @@ final class HMN_CRM_Core {
 			'remember' => ! empty( $_POST['rememberme'] ),
 		);
 		$user = wp_signon( $credentials, is_ssl() );
-		if ( is_wp_error( $user ) || ! self::can( self::CAP_ACCESS ) ) {
-			if ( ! is_wp_error( $user ) ) { wp_logout(); }
+		if ( is_wp_error( $user ) ) {
+			wp_safe_redirect( add_query_arg( 'hmn_crm_login', 'failed', home_url( '/hcrm/' ) ) );
+			exit;
+		}
+		/* wp_signon() sets the auth cookie but not the current user for this request; the capability check below would otherwise run as a guest. */
+		wp_set_current_user( $user->ID );
+		if ( ! self::can( self::CAP_ACCESS ) ) {
+			wp_logout();
 			wp_safe_redirect( add_query_arg( 'hmn_crm_login', 'failed', home_url( '/hcrm/' ) ) );
 			exit;
 		}
@@ -181,7 +214,7 @@ final class HMN_CRM_Core {
 		$failed = isset( $_GET['hmn_crm_login'] ) && 'failed' === sanitize_key( wp_unslash( $_GET['hmn_crm_login'] ) );
 		?><!doctype html>
 <html <?php language_attributes(); ?> dir="rtl">
-<head><meta charset="<?php bloginfo( 'charset' ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ورود به HMN CRM</title><?php wp_head(); ?>
+<head><meta charset="<?php bloginfo( 'charset' ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ورود به HMN CRM</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#172033;font-family:Tahoma,"Segoe UI",sans-serif}.hmn-login{width:min(100% - 32px,400px);padding:32px;background:#fff;border:1px solid #e7eaf1;border-radius:18px;box-shadow:0 16px 42px rgba(22,32,51,.12)}.hmn-login-brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;margin-bottom:28px}.hmn-login-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(135deg,#8175ff,#4c3bdd)}.hmn-login h1{font-size:21px;margin:0 0 8px}.hmn-login p{color:#667085;line-height:1.8;margin:0 0 22px}.hmn-login label{display:grid;gap:7px;margin:14px 0;font-size:13px;font-weight:700}.hmn-login input[type=text],.hmn-login input[type=password]{height:46px;border:1px solid #d0d5dd;border-radius:9px;padding:0 12px;font:inherit;direction:ltr;text-align:left}.hmn-login .remember{display:flex;align-items:center;gap:7px;font-weight:400}.hmn-login button{width:100%;height:48px;border:0;border-radius:9px;background:#5b4cf0;color:#fff;font:inherit;font-weight:700;cursor:pointer;margin-top:8px}.hmn-login-error{padding:10px 12px;background:#fff1f3;color:#b42318;border-radius:8px;font-size:13px}</style></head>
 <body><main class="hmn-login"><div class="hmn-login-brand"><span class="hmn-login-mark">H</span><span>HMN CRM</span></div><h1>ورود اپراتور</h1><p>نام کاربری و رمز عبور CRM خود را وارد کنید.</p><?php if ( $failed ) : ?><div class="hmn-login-error">نام کاربری، رمز عبور یا سطح دسترسی معتبر نیست.</div><?php endif; ?><form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>"><label>نام کاربری<input type="text" name="log" required autocomplete="username"></label><label>رمز عبور<input type="password" name="pwd" required autocomplete="current-password"></label><label class="remember"><input type="checkbox" name="rememberme" value="forever"> مرا به خاطر بسپار</label><input type="hidden" name="action" value="hmn_crm_login"><?php wp_nonce_field( 'hmn_crm_login', 'hmn_crm_login_nonce' ); ?><button type="submit">ورود به CRM</button></form></main><?php wp_footer(); ?></body></html><?php
 	}
@@ -215,6 +248,7 @@ final class HMN_CRM_Core {
 	public function render_portal_navigation_enhancements() {
 		$appointments_url = home_url( '/hcrm/' );
 		$patients_url = add_query_arg( 'section', 'customers', $appointments_url );
+		$accounting_url = add_query_arg( 'section', 'accounting', $appointments_url );
 		$scheduling_url = add_query_arg( 'section', 'scheduling', $appointments_url );
 		$panel_url = add_query_arg( 'section', 'settings', $appointments_url );
 		$sms_url = $panel_url . '#hmn-sms-settings';
@@ -226,16 +260,16 @@ final class HMN_CRM_Core {
 			.hmn-nav{gap:5px!important}.hmn-nav-parent{width:100%;border:0;background:transparent;color:inherit;border-radius:10px;padding:13px 12px;font:inherit;text-align:right;cursor:pointer;display:flex;align-items:center;justify-content:space-between}.hmn-nav-parent:hover,.hmn-nav-parent.is-open{background:#2a3150;color:#fff}.hmn-nav-parent .hmn-nav-arrow{transition:transform .18s}.hmn-nav-parent.is-open .hmn-nav-arrow{transform:rotate(180deg)}.hmn-nav-group{display:none;margin:0 12px 4px;border-right:1px solid #46506f;padding-right:8px}.hmn-nav-group.is-open{display:grid;gap:3px}.hmn-nav-group a{padding:9px 10px!important;font-size:12px!important;color:#bfc8df!important}.hmn-nav-group a.is-active,.hmn-nav-group a:hover{color:#fff!important;background:#2a3150}.hmn-brand{font-size:18px!important}
 		</style>
 		<script>(function(){
-			var urls={appointments:<?php echo wp_json_encode( $appointments_url ); ?>,patients:<?php echo wp_json_encode( $patients_url ); ?>,scheduling:<?php echo wp_json_encode( $scheduling_url ); ?>,panel:<?php echo wp_json_encode( $panel_url ); ?>,sms:<?php echo wp_json_encode( $sms_url ); ?>},canSchedule=<?php echo wp_json_encode( $show_scheduling ); ?>,canPanel=<?php echo wp_json_encode( $show_panel_settings ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>,current=location.href;
+			var urls={appointments:<?php echo wp_json_encode( $appointments_url ); ?>,patients:<?php echo wp_json_encode( $patients_url ); ?>,accounting:<?php echo wp_json_encode( $accounting_url ); ?>,scheduling:<?php echo wp_json_encode( $scheduling_url ); ?>,panel:<?php echo wp_json_encode( $panel_url ); ?>,sms:<?php echo wp_json_encode( $sms_url ); ?>},canSchedule=<?php echo wp_json_encode( $show_scheduling ); ?>,canPanel=<?php echo wp_json_encode( $show_panel_settings ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>,current=location.href;
 			document.querySelectorAll('.hmn-brand').forEach(function(brand){brand.innerHTML='<span class="hmn-brand-mark">H</span><span>پنل هومانا</span>'});
 			document.querySelectorAll('.hmn-portal .hmn-nav').forEach(function(nav){
-				var items='<a data-nav="appointments" href="'+urls.appointments+'"><span>⌂</span> نوبت‌ها</a><a data-nav="patients" href="'+urls.patients+'"><span>♙</span> بیماران</a>';
+				var items='<a data-nav="appointments" href="'+urls.appointments+'"><span>⌂</span> نوبت‌ها</a><a data-nav="patients" href="'+urls.patients+'"><span>♙</span> بیماران</a><a data-nav="accounting" href="'+urls.accounting+'"><span>۵</span> حسابداری</a>';
 				if(canSchedule||canPanel){items+='<button type="button" class="hmn-nav-parent" aria-expanded="false"><span><span>⚙</span> تنظیمات</span><span class="hmn-nav-arrow">⌄</span></button><div class="hmn-nav-group">';
 					if(canSchedule)items+='<a data-nav="scheduling" href="'+urls.scheduling+'">تنظیمات نوبت‌دهی</a>';
 					if(canPanel){items+='<a data-nav="panel" href="'+urls.panel+'">تنظیمات پنل</a><a data-nav="sms" href="'+urls.sms+'">تنظیمات پیامک</a>';}
 				items+='</div>';}
 				nav.innerHTML=items;
-				var active=current.indexOf('section=customers')>-1?'patients':current.indexOf('section=scheduling')>-1?'scheduling':location.hash==='#hmn-sms-settings'?'sms':current.indexOf('section=settings')>-1?'panel':'appointments';
+				var active=current.indexOf('section=customers')>-1?'patients':current.indexOf('section=accounting')>-1?'accounting':current.indexOf('section=scheduling')>-1?'scheduling':location.hash==='#hmn-sms-settings'?'sms':current.indexOf('section=settings')>-1?'panel':'appointments';
 				var link=nav.querySelector('[data-nav="'+active+'"]');if(link)link.classList.add('is-active');
 				var parent=nav.querySelector('.hmn-nav-parent'),group=nav.querySelector('.hmn-nav-group');if(parent&&group){var open=active==='scheduling'||active==='panel';parent.classList.toggle('is-open',open);group.classList.toggle('is-open',open);parent.setAttribute('aria-expanded',open?'true':'false');parent.onclick=function(){var next=!group.classList.contains('is-open');group.classList.toggle('is-open',next);parent.classList.toggle('is-open',next);parent.setAttribute('aria-expanded',next?'true':'false')}}
 			});

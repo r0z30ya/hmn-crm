@@ -21,6 +21,7 @@ final class HMN_CRM_Appointments implements HMN_CRM_Module_Interface {
 		add_action( 'wp_ajax_hmn_ea_operator_book', array( $this, 'operator_book' ) );
 		add_action( 'wp_ajax_hmn_ea_customer_history', array( $this, 'customer_history' ) );
 		add_action( 'wp_ajax_hmn_ea_cancel_appointment', array( $this, 'cancel' ) );
+		add_action( 'wp_ajax_hmn_ea_delivery_diag', array( $this, 'delivery_diag' ) );
 	}
 
 	public function operator_book() {
@@ -54,8 +55,50 @@ final class HMN_CRM_Appointments implements HMN_CRM_Module_Interface {
 		$end = $start_object ? $start_object->modify( '+' . $duration . ' minutes' )->format( 'Y-m-d H:i:s' ) : $start;
 		$appointment = HMN_CRM_EasyAppointments::request( 'POST', 'appointments', array( 'start' => $start, 'end' => $end, 'customerId' => $customer_id, 'providerId' => $provider, 'serviceId' => $service, 'start_datetime' => $start, 'end_datetime' => $end, 'id_users_customer' => $customer_id, 'id_users_provider' => $provider, 'id_services' => $service, 'status' => 'Booked' ) );
 		if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); }
-		$this->send_booking_sms( $phone, trim( $first . ' ' . $last ), $date, $time );
-		wp_send_json_success( array( 'id' => absint( $appointment['id'] ?? 0 ) ) );
+		$appointment_id = absint( $appointment['id'] ?? 0 );
+		$sms_settings = get_option( 'hmn_crm_sms_settings', array() );
+		$body_id      = is_array( $sms_settings ) ? absint( $sms_settings['melipayamak_booking_body_id'] ?? 0 ) : 0;
+		if ( $body_id && $phone ) {
+			try {
+				$sms_result = ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( trim( $first . ' ' . $last ), self::jalali_date( $date ), $time ), array( 'type' => 'booking', 'appointment_id' => $appointment_id ) );
+				if ( is_array( $sms_result ) && class_exists( 'HMN_CRM_SMS' ) ) {
+					HMN_CRM_SMS::record_recid( $appointment_id, $sms_result );
+				}
+			} catch ( Exception $e ) {
+				error_log( 'HMN CRM booking SMS failed for appointment ' . $appointment_id . ': ' . $e->getMessage() );
+			}
+		}
+		wp_send_json_success( array( 'id' => $appointment_id ) );
+	}
+
+	public function delivery_diag() {
+		$this->verify();
+		$action = isset( $_POST['diag'] ) ? sanitize_key( wp_unslash( $_POST['diag'] ) ) : '';
+		if ( 'store_recid' === $action ) {
+			$aid    = absint( $_POST['appointment_id'] ?? 0 );
+			$rec_id = absint( $_POST['rec_id'] ?? 0 );
+			if ( ! $aid || ! $rec_id ) { wp_send_json_error( array( 'message' => 'appointment_id و rec_id معتبر الزامی‌اند.' ) ); }
+			HMN_CRM_SMS::record_recid( $aid, array( 'recId' => $rec_id ) );
+			$stored = HMN_CRM_SMS::recids_for_appointments( array( $aid ) );
+			wp_send_json_success( array( 'stored' => $stored, 'map' => HMN_CRM_SMS::recids_for_appointments( array( $aid ) ) ) );
+		}
+		if ( 'delivery_status' === $action ) {
+			$rec_id = absint( $_POST['rec_id'] ?? 0 );
+			if ( ! $rec_id ) { wp_send_json_error( array( 'message' => 'rec_id معتبر الزامی است.' ) ); }
+			$result = HMN_CRM_SMS::delivery_statuses( array( $rec_id ) );
+			wp_send_json_success( array( 'rec_id' => $rec_id, 'delivery_status' => isset( $result[ $rec_id ] ) ? $result[ $rec_id ] : 'pending', 'raw_map' => $result ) );
+		}
+		if ( 'full_check' === $action ) {
+			$aid    = absint( $_POST['appointment_id'] ?? 0 );
+			$rec_id = absint( $_POST['rec_id'] ?? 0 );
+			if ( ! $aid || ! $rec_id ) { wp_send_json_error( array( 'message' => 'appointment_id و rec_id معتبر الزامی‌اند.' ) ); }
+			HMN_CRM_SMS::record_recid( $aid, array( 'recId' => $rec_id ) );
+			$recids  = HMN_CRM_SMS::recids_for_appointments( array( $aid ) );
+			$rec     = isset( $recids[ (string) $aid ] ) ? $recids[ (string) $aid ] : 0;
+			$status  = $rec ? ( HMN_CRM_SMS::delivery_statuses( array( $rec ) )[ $rec ] ?? 'pending' ) : 'no_recid';
+			wp_send_json_success( array( 'appointment_id' => $aid, 'recid_for' => $rec, 'delivery_status_for' => $status ) );
+		}
+		wp_send_json_error( array( 'message' => 'action diag نامعتبر است.' ) );
 	}
 
 	public function customer_history() {
@@ -94,7 +137,16 @@ final class HMN_CRM_Appointments implements HMN_CRM_Module_Interface {
 				$name = trim( (string) ( $customer['firstName'] ?? ( $customer['first_name'] ?? '' ) ) . ' ' . (string) ( $customer['lastName'] ?? ( $customer['last_name'] ?? '' ) ) );
 				$settings = get_option( 'hmn_crm_sms_settings', array() );
 				$body_id = is_array( $settings ) ? absint( $settings['melipayamak_booking_cancel_body_id'] ?? 0 ) : 0;
-				if ( $body_id && $phone ) { ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( $name, self::jalali_date( substr( (string) ( $appointment['start'] ?? '' ), 0, 10 ) ), substr( (string) ( $appointment['start'] ?? '' ), 11, 5 ) ) ); }
+				if ( $body_id && $phone ) {
+					try {
+						$sms_result = ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( $name, self::jalali_date( substr( (string) ( $appointment['start'] ?? '' ), 0, 10 ) ), substr( (string) ( $appointment['start'] ?? '' ), 11, 5 ) ), array( 'type' => 'cancel', 'appointment_id' => $id ) );
+						if ( is_array( $sms_result ) && class_exists( 'HMN_CRM_SMS' ) ) {
+							HMN_CRM_SMS::record_recid( $id, $sms_result );
+						}
+					} catch ( Exception $e ) {
+						error_log( 'HMN CRM cancel SMS failed for appointment ' . $id . ': ' . $e->getMessage() );
+					}
+				}
 			}
 		}
 		$deleted = HMN_CRM_EasyAppointments::request( 'DELETE', 'appointments/' . $id );
@@ -104,7 +156,20 @@ final class HMN_CRM_Appointments implements HMN_CRM_Module_Interface {
 
 	private function verify() { if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_APPOINTMENTS ) || ! check_ajax_referer( 'hmn_ea_operator_booking', 'nonce', false ) ) { wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 ); } }
 	private function error( $error ) { wp_send_json_error( array( 'message' => $error->get_error_message() ), (int) ( $error->get_error_data()['status'] ?? 502 ) ); }
-	private function send_booking_sms( $phone, $name, $date, $time ) { $settings = get_option( 'hmn_crm_sms_settings', array() ); $body_id = is_array( $settings ) ? absint( $settings['melipayamak_booking_body_id'] ?? 0 ) : 0; if ( $body_id ) { ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( $name, self::jalali_date( $date ), $time ) ); } }
+	private function send_booking_sms( $phone, $name, $date, $time ) {
+		$settings = get_option( 'hmn_crm_sms_settings', array() );
+		$body_id  = is_array( $settings ) ? absint( $settings['melipayamak_booking_body_id'] ?? 0 ) : 0;
+		if ( $body_id ) {
+			try {
+				$sms_result = ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( $name, self::jalali_date( $date ), $time ), array( 'type' => 'booking' ) );
+				if ( is_array( $sms_result ) && class_exists( 'HMN_CRM_SMS' ) ) {
+					HMN_CRM_SMS::record_recid( 0, $sms_result );
+				}
+			} catch ( Exception $e ) {
+				error_log( 'HMN CRM booking SMS (no-id) failed: ' . $e->getMessage() );
+			}
+		}
+	}
 	private static function jalali_date( $date ) { $time = strtotime( $date ); $gy = (int) wp_date( 'Y', $time ); $gm = (int) wp_date( 'n', $time ); $gd = (int) wp_date( 'j', $time ); $gdm = array( 0,31,59,90,120,151,181,212,243,273,304,334 ); $jy = $gy > 1600 ? 979 : 0; $gy -= $gy > 1600 ? 1600 : 621; $gy2 = $gm > 2 ? $gy + 1 : $gy; $days = 365 * $gy + (int) floor( ( $gy2 + 3 ) / 4 ) - (int) floor( ( $gy2 + 99 ) / 100 ) + (int) floor( ( $gy2 + 399 ) / 400 ) - 80 + $gd + $gdm[ $gm - 1 ]; $jy += 33 * (int) floor( $days / 12053 ); $days %= 12053; $jy += 4 * (int) floor( $days / 1461 ); $days %= 1461; if ( $days > 365 ) { $jy += (int) floor( ( $days - 1 ) / 365 ); $days = ( $days - 1 ) % 365; } $jm = $days < 186 ? 1 + (int) floor( $days / 31 ) : 7 + (int) floor( ( $days - 186 ) / 30 ); $jd = 1 + ( $days < 186 ? $days % 31 : ( $days - 186 ) % 30 ); return sprintf( '%04d/%02d/%02d', $jy, $jm, $jd ); }
 }
 

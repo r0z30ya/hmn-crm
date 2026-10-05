@@ -162,9 +162,13 @@ final class HMN_CRM_Booking {
 			}
 		}
 
-		$result = ( new HMN_CRM_SMS() )->send_pattern( sanitize_text_field( (string) $data['user_phone'] ), $body_id, $args );
+		$appointment_id = 0;
+		foreach ( array( $booking, $form_data ) as $source ) { if ( is_array( $source ) && isset( $source['id'] ) && is_scalar( $source['id'] ) ) { $appointment_id = absint( $source['id'] ); break; } }
+		$result = ( new HMN_CRM_SMS() )->send_pattern( sanitize_text_field( (string) $data['user_phone'] ), $body_id, $args, array( 'type' => 'booking', 'appointment_id' => $appointment_id ) );
 		if ( ! is_wp_error( $result ) ) {
 			$this->sent_notifications[] = $notification_key;
+			/* Remember the recId so the dashboard can show a delivery tick next to the patient. */
+			HMN_CRM_SMS::record_recid( $appointment_id, $result );
 		}
 	}
 
