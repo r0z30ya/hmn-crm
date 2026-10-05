@@ -251,6 +251,7 @@ final class HMN_CRM_Core {
 		$accounting_url = add_query_arg( 'section', 'accounting', $appointments_url );
 		$scheduling_url = add_query_arg( 'section', 'scheduling', $appointments_url );
 		$panel_url = add_query_arg( 'section', 'settings', $appointments_url );
+		$accounting_settings_url = add_query_arg( 'section', 'accounting-settings', $appointments_url );
 		$sms_url = $panel_url . '#hmn-sms-settings';
 		$show_scheduling = self::can( self::CAP_MANAGE_SCHEDULING );
 		$show_panel_settings = self::can( self::CAP_MANAGE_SETTINGS );
@@ -260,18 +261,19 @@ final class HMN_CRM_Core {
 			.hmn-nav{gap:5px!important}.hmn-nav-parent{width:100%;border:0;background:transparent;color:inherit;border-radius:10px;padding:13px 12px;font:inherit;text-align:right;cursor:pointer;display:flex;align-items:center;justify-content:space-between}.hmn-nav-parent:hover,.hmn-nav-parent.is-open{background:#2a3150;color:#fff}.hmn-nav-parent .hmn-nav-arrow{transition:transform .18s}.hmn-nav-parent.is-open .hmn-nav-arrow{transform:rotate(180deg)}.hmn-nav-group{display:none;margin:0 12px 4px;border-right:1px solid #46506f;padding-right:8px}.hmn-nav-group.is-open{display:grid;gap:3px}.hmn-nav-group a{padding:9px 10px!important;font-size:12px!important;color:#bfc8df!important}.hmn-nav-group a.is-active,.hmn-nav-group a:hover{color:#fff!important;background:#2a3150}.hmn-brand{font-size:18px!important}
 		</style>
 		<script>(function(){
-			var urls={appointments:<?php echo wp_json_encode( $appointments_url ); ?>,patients:<?php echo wp_json_encode( $patients_url ); ?>,accounting:<?php echo wp_json_encode( $accounting_url ); ?>,scheduling:<?php echo wp_json_encode( $scheduling_url ); ?>,panel:<?php echo wp_json_encode( $panel_url ); ?>,sms:<?php echo wp_json_encode( $sms_url ); ?>},canSchedule=<?php echo wp_json_encode( $show_scheduling ); ?>,canPanel=<?php echo wp_json_encode( $show_panel_settings ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>,current=location.href;
+			var urls={appointments:<?php echo wp_json_encode( $appointments_url ); ?>,patients:<?php echo wp_json_encode( $patients_url ); ?>,accounting:<?php echo wp_json_encode( $accounting_url ); ?>,accountingSettings:<?php echo wp_json_encode( $accounting_settings_url ); ?>,scheduling:<?php echo wp_json_encode( $scheduling_url ); ?>,panel:<?php echo wp_json_encode( $panel_url ); ?>,sms:<?php echo wp_json_encode( $sms_url ); ?>},canSchedule=<?php echo wp_json_encode( $show_scheduling ); ?>,canPanel=<?php echo wp_json_encode( $show_panel_settings ); ?>,canAccounting=<?php echo wp_json_encode( self::can( self::CAP_MANAGE_ACCOUNTING ) ); ?>,hideWpAdmin=<?php echo wp_json_encode( $hide_wp_admin ); ?>,current=location.href;
 			document.querySelectorAll('.hmn-brand').forEach(function(brand){brand.innerHTML='<span class="hmn-brand-mark">H</span><span>پنل هومانا</span>'});
 			document.querySelectorAll('.hmn-portal .hmn-nav').forEach(function(nav){
 				var items='<a data-nav="appointments" href="'+urls.appointments+'"><span>⌂</span> نوبت‌ها</a><a data-nav="patients" href="'+urls.patients+'"><span>♙</span> بیماران</a><a data-nav="accounting" href="'+urls.accounting+'"><span>۵</span> حسابداری</a>';
 				if(canSchedule||canPanel){items+='<button type="button" class="hmn-nav-parent" aria-expanded="false"><span><span>⚙</span> تنظیمات</span><span class="hmn-nav-arrow">⌄</span></button><div class="hmn-nav-group">';
 					if(canSchedule)items+='<a data-nav="scheduling" href="'+urls.scheduling+'">تنظیمات نوبت‌دهی</a>';
+					if(canAccounting)items+='<a data-nav="accountingSettings" href="'+urls.accountingSettings+'">تنظیمات حسابداری</a>';
 					if(canPanel){items+='<a data-nav="panel" href="'+urls.panel+'">تنظیمات پنل</a><a data-nav="sms" href="'+urls.sms+'">تنظیمات پیامک</a>';}
 				items+='</div>';}
 				nav.innerHTML=items;
-				var active=current.indexOf('section=customers')>-1?'patients':current.indexOf('section=accounting')>-1?'accounting':current.indexOf('section=scheduling')>-1?'scheduling':location.hash==='#hmn-sms-settings'?'sms':current.indexOf('section=settings')>-1?'panel':'appointments';
+				var active=current.indexOf('section=customers')>-1?'patients':current.indexOf('section=accounting-settings')>-1?'accountingSettings':current.indexOf('section=accounting')>-1?'accounting':current.indexOf('section=scheduling')>-1?'scheduling':location.hash==='#hmn-sms-settings'?'sms':current.indexOf('section=settings')>-1?'panel':'appointments';
 				var link=nav.querySelector('[data-nav="'+active+'"]');if(link)link.classList.add('is-active');
-				var parent=nav.querySelector('.hmn-nav-parent'),group=nav.querySelector('.hmn-nav-group');if(parent&&group){var open=active==='scheduling'||active==='panel';parent.classList.toggle('is-open',open);group.classList.toggle('is-open',open);parent.setAttribute('aria-expanded',open?'true':'false');parent.onclick=function(){var next=!group.classList.contains('is-open');group.classList.toggle('is-open',next);parent.classList.toggle('is-open',next);parent.setAttribute('aria-expanded',next?'true':'false')}}
+				var parent=nav.querySelector('.hmn-nav-parent'),group=nav.querySelector('.hmn-nav-group');if(parent&&group){var open=active==='scheduling'||active==='panel'||active==='accountingSettings';parent.classList.toggle('is-open',open);group.classList.toggle('is-open',open);parent.setAttribute('aria-expanded',open?'true':'false');parent.onclick=function(){var next=!group.classList.contains('is-open');group.classList.toggle('is-open',next);parent.classList.toggle('is-open',next);parent.setAttribute('aria-expanded',next?'true':'false')}}
 			});
 		})();</script>
 		<?php
