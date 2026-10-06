@@ -37,24 +37,34 @@ final class HMN_CRM_EasyAppointments {
 		return is_array( $logs ) ? array_values( $logs ) : array();
 	}
 
-	private static function log_connection( $method, $path, $status, $message, $duration_ms ) {
+	private static function log_connection( $method, $path, $status, $message, $duration_ms, $error_code = '' ) {
 		$logs = self::connection_logs();
 		array_unshift( $logs, array(
 			'time' => current_time( 'mysql' ),
 			'method' => sanitize_key( strtoupper( $method ) ),
 			'path' => sanitize_text_field( '/' . ltrim( (string) $path, '/' ) ),
 			'status' => absint( $status ),
-			'duration_ms' => max( 0, absint( $duration_ms ) ),
+			'duration_ms' => max( 0, (int) $duration_ms ),
 			'message' => sanitize_text_field( (string) $message ),
+			'error_code' => sanitize_text_field( (string) $error_code ),
 		) );
 		update_option( self::CONNECTION_LOG_OPTION, array_slice( $logs, 0, self::CONNECTION_LOG_LIMIT ), false );
+		if ( $status < 200 || $status >= 300 || '' !== (string) $error_code ) {
+			// Request bodies and the API key are never logged.
+			error_log( sprintf( '[HMN CRM EA] %s %s => status=%d duration_ms=%d error=%s msg=%s', strtoupper( (string) $method ), '/' . ltrim( (string) $path, '/' ), (int) $status, max( 0, (int) $duration_ms ), (string) $error_code, (string) $message ) );
+		}
 	}
+
+	/** Timeout for Easy!Appointments API requests in seconds. The remote EA server spends
+	 * ~11s on POST /appointments (notification e-mail attempt), so 12s left almost no headroom
+	 * and made every new-customer booking time out with cURL error 28. */
+	const REQUEST_TIMEOUT = 30;
 
 	/** Authenticated Easy!Appointments API request. */
 	public static function request( $method, $path, $body = null, $query = array() ) {
 		$started = microtime( true );
 		$s = self::settings(); $base = isset( $s['base_url'] ) ? untrailingslashit( esc_url_raw( $s['base_url'] ) ) : ''; $key = isset( $s['api_key'] ) && is_scalar( $s['api_key'] ) ? trim( (string) $s['api_key'] ) : '';
-		if ( ! $base || ! $key ) { $message = 'اتصال موتور نوبت‌دهی هنوز پیکربندی نشده است.'; self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_not_configured', $message ); }
+		if ( ! $base || ! $key ) { $message = 'اتصال موتور نوبت‌دهی هنوز پیکربندی نشده است.'; self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000, 'not_configured' ); return new WP_Error( 'hmn_ea_not_configured', $message ); }
 		$method = strtoupper( $method );
 		$cache_key = '';
 		if ( 'GET' === $method && self::cache_ttl( $path ) ) {
@@ -63,12 +73,20 @@ final class HMN_CRM_EasyAppointments {
 			if ( false !== $cached ) { return $cached; }
 		}
 		$url = $base . '/index.php/api/v1/' . ltrim( $path, '/' ); if ( $query ) { $url = add_query_arg( $query, $url ); }
-		$args = array( 'method' => $method, 'timeout' => 12, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
+		$args = array( 'method' => $method, 'timeout' => self::REQUEST_TIMEOUT, 'headers' => array( 'Accept' => 'application/json', 'Authorization' => 'Bearer ' . $key ) );
 		if ( null !== $body ) { $args['headers']['Content-Type'] = 'application/json; charset=utf-8'; $args['body'] = wp_json_encode( $body ); }
-		$r = wp_remote_request( $url, $args ); if ( is_wp_error( $r ) ) { $message = 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $r->get_error_message(); self::log_connection( $method, $path, 0, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_unreachable', $message ); }
+		$r = wp_remote_request( $url, $args );
+		$elapsed_ms = ( microtime( true ) - $started ) * 1000;
+		if ( is_wp_error( $r ) ) {
+			$error_code = $r->get_error_code(); // e.g. http_request_failed for cURL errors.
+			$raw_message = $r->get_error_message(); // Contains "cURL error N: ..." — never contains the body or API key.
+			$message = 'ارتباط با موتور نوبت‌دهی برقرار نشد: ' . $raw_message;
+			self::log_connection( $method, $path, 0, $message, $elapsed_ms, $error_code );
+			return new WP_Error( 'hmn_ea_unreachable', $message, array( 'curl_error' => $error_code, 'raw_message' => $raw_message, 'path' => $path, 'duration_ms' => (int) $elapsed_ms ) );
+		}
 		$status = (int) wp_remote_retrieve_response_code( $r ); $raw = (string) wp_remote_retrieve_body( $r ); $data = '' === $raw ? array() : json_decode( $raw, true );
-		if ( $status < 200 || $status >= 300 || ( '' !== $raw && ! is_array( $data ) ) ) { $message = is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'پاسخ ناموفق از موتور نوبت‌دهی دریافت شد.'; self::log_connection( $method, $path, $status, $message, ( microtime( true ) - $started ) * 1000 ); return new WP_Error( 'hmn_ea_api_error', sanitize_text_field( $message ), array( 'status' => $status ) ); }
-		self::log_connection( $method, $path, $status, 'اتصال موفق', ( microtime( true ) - $started ) * 1000 );
+		if ( $status < 200 || $status >= 300 || ( '' !== $raw && ! is_array( $data ) ) ) { $message = is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'پاسخ ناموفق از موتور نوبت‌دهی دریافت شد.'; self::log_connection( $method, $path, $status, $message, $elapsed_ms, 'http_' . $status ); return new WP_Error( 'hmn_ea_api_error', sanitize_text_field( $message ), array( 'status' => $status ) ); }
+		self::log_connection( $method, $path, $status, 'اتصال موفق', $elapsed_ms );
 		if ( $cache_key ) { set_transient( $cache_key, $data, self::cache_ttl( $path ) ); }
 		if ( 'GET' !== $method ) { update_option( self::CACHE_VERSION_OPTION, absint( get_option( self::CACHE_VERSION_OPTION, 1 ) ) + 1, false ); }
 		return $data;
@@ -173,9 +191,9 @@ final class HMN_CRM_EasyAppointments {
 		if ( ! $first || ! $last || ! preg_match( '/^09\d{9}$/', $phone ) || ! $service || ! $provider || ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date ) || ! preg_match( '/^\d{2}:\d{2}$/', $time ) ) { wp_send_json_error( array( 'message' => 'همه اطلاعات نوبت را کامل و صحیح وارد کنید.' ), 400 ); }
 		$slots = self::request( 'GET', 'availabilities', null, array( 'serviceId' => $service, 'providerId' => $provider, 'date' => $date ) ); if ( is_wp_error( $slots ) ) { $this->error( $slots ); } if ( ! in_array( $time, $slots, true ) ) { wp_send_json_error( array( 'message' => 'این ساعت دیگر آزاد نیست.' ), 409 ); }
 		$customers = self::request( 'GET', 'customers', null, array( 'q' => $phone, 'length' => 100 ) ); if ( is_wp_error( $customers ) ) { $this->error( $customers ); } $customer_id = 0; foreach ( $customers as $customer ) { $customer_phone = $customer['phone'] ?? ( $customer['phone_number'] ?? '' ); if ( preg_replace( '/\D+/', '', (string) $customer_phone ) === $phone ) { $customer_id = absint( $customer['id'] ?? 0 ); break; } }
-		if ( ! $customer_id ) { $customer = self::request( 'POST', 'customers', array( 'firstName' => $first, 'lastName' => $last, 'phone' => $phone, 'first_name' => $first, 'last_name' => $last, 'phone_number' => $phone, 'email' => $phone . '@phone.invalid', 'timezone' => 'Asia/Tehran', 'language' => 'english' ) ); if ( is_wp_error( $customer ) ) { $this->error( $customer ); } $customer_id = absint( $customer['id'] ?? 0 ); }
+		if ( ! $customer_id ) { $customer = self::request( 'POST', 'customers', array( 'firstName' => $first, 'lastName' => $last, 'phone' => $phone, 'timezone' => 'Asia/Tehran' ) ); if ( is_wp_error( $customer ) ) { $this->error( $customer ); } $customer_id = absint( $customer['id'] ?? 0 ); }
 		$service_data = self::request( 'GET', 'services/' . $service ); $duration = is_array( $service_data ) && ! empty( $service_data['duration'] ) ? absint( $service_data['duration'] ) : 15; $start = $date . ' ' . $time . ':00'; $start_date = DateTime::createFromFormat( 'Y-m-d H:i:s', $start, new DateTimeZone( 'Asia/Tehran' ) ); $end = $start_date ? $start_date->modify( '+' . $duration . ' minutes' )->format( 'Y-m-d H:i:s' ) : $start;
-		$appointment = self::request( 'POST', 'appointments', array( 'start' => $start, 'end' => $end, 'customerId' => $customer_id, 'providerId' => $provider, 'serviceId' => $service, 'start_datetime' => $start, 'end_datetime' => $end, 'id_users_customer' => $customer_id, 'id_users_provider' => $provider, 'id_services' => $service, 'status' => 'Booked' ) ); if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); }
+		$appointment = self::request( 'POST', 'appointments', array( 'start' => $start, 'end' => $end, 'customerId' => $customer_id, 'providerId' => $provider, 'serviceId' => $service, 'status' => 'Booked' ) ); if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); }
 		$sms = get_option( 'hmn_crm_sms_settings', array() ); $body_id = is_array( $sms ) ? absint( $sms['melipayamak_booking_body_id'] ?? 0 ) : 0; if ( $body_id ) { HMN_CRM_SMS::record_recid( $appointment['id'] ?? 0, ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( trim( $first . ' ' . $last ), self::jalali_date( $date ), $time ), array( 'type' => 'booking', 'appointment_id' => absint( $appointment['id'] ?? 0 ) ) ) ); }
 		wp_send_json_success( array( 'id' => absint( $appointment['id'] ?? 0 ) ) );
 	}
@@ -186,13 +204,13 @@ final class HMN_CRM_EasyAppointments {
 		$stored = get_transient( 'hmn_crm_otp_' . md5( $phone ) ); if ( ! $stored || ! hash_equals( (string) $stored, $otp ) ) { wp_send_json_error( array( 'message' => 'کد تأیید اشتباه است یا منقضی شده است.' ), 403 ); }
 		$slots = self::request( 'GET', 'availabilities', null, array( 'serviceId' => $service, 'providerId' => $provider, 'date' => $date ) ); if ( is_wp_error( $slots ) ) { $this->error( $slots ); } $slots = class_exists( 'HMN_CRM_Scheduling' ) ? HMN_CRM_Scheduling::filter_slots( $slots, $date, $service, $provider ) : $slots; if ( ! in_array( $time, $slots, true ) ) { wp_send_json_error( array( 'message' => 'این زمان دیگر طبق قوانین رزرو در دسترس نیست؛ لطفاً زمان دیگری انتخاب کنید.' ), 409 ); }
 		$customers = self::request( 'GET', 'customers', null, array( 'q' => $phone, 'length' => 100 ) ); if ( is_wp_error( $customers ) ) { $this->error( $customers ); } $customer_id = 0; foreach ( $customers as $customer ) { if ( isset( $customer['phone'] ) && preg_replace( '/\D+/', '', (string) $customer['phone'] ) === $phone ) { $customer_id = absint( $customer['id'] ); break; } }
-		if ( ! $customer_id ) { $customer = self::request( 'POST', 'customers', array( 'firstName' => $first, 'lastName' => $last, 'phone' => $phone, 'first_name' => $first, 'last_name' => $last, 'phone_number' => $phone, 'email' => $phone . '@phone.invalid', 'timezone' => 'Asia/Tehran', 'language' => 'english' ) ); if ( is_wp_error( $customer ) ) { $this->error( $customer ); } $customer_id = absint( $customer['id'] ?? 0 ); }
+		if ( ! $customer_id ) { $customer = self::request( 'POST', 'customers', array( 'firstName' => $first, 'lastName' => $last, 'phone' => $phone, 'timezone' => 'Asia/Tehran' ) ); if ( is_wp_error( $customer ) ) { $this->error( $customer ); } $customer_id = absint( $customer['id'] ?? 0 ); }
 		$service_data = self::request( 'GET', 'services/' . $service );
 		$duration = is_array( $service_data ) && ! empty( $service_data['duration'] ) ? absint( $service_data['duration'] ) : 15;
 		$start = $date . ' ' . $time . ':00';
 		$start_date = DateTime::createFromFormat( 'Y-m-d H:i:s', $start, new DateTimeZone( 'Asia/Tehran' ) );
 		$end = $start_date ? $start_date->modify( '+' . $duration . ' minutes' )->format( 'Y-m-d H:i:s' ) : $start;
-		$appointment = self::request( 'POST', 'appointments', array( 'start' => $start, 'end' => $end, 'customerId' => $customer_id, 'providerId' => $provider, 'serviceId' => $service, 'start_datetime' => $start, 'end_datetime' => $end, 'id_users_customer' => $customer_id, 'id_users_provider' => $provider, 'id_services' => $service, 'status' => 'Booked' ) ); if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); } delete_transient( 'hmn_crm_otp_' . md5( $phone ) );
+		$appointment = self::request( 'POST', 'appointments', array( 'start' => $start, 'end' => $end, 'customerId' => $customer_id, 'providerId' => $provider, 'serviceId' => $service, 'status' => 'Booked' ) ); if ( is_wp_error( $appointment ) ) { $this->error( $appointment ); } delete_transient( 'hmn_crm_otp_' . md5( $phone ) );
 		$sms = get_option( 'hmn_crm_sms_settings', array() ); $body_id = is_array( $sms ) ? absint( $sms['melipayamak_booking_body_id'] ?? 0 ) : 0; if ( $body_id ) { HMN_CRM_SMS::record_recid( $appointment['id'] ?? 0, ( new HMN_CRM_SMS() )->send_pattern( $phone, $body_id, array( trim( $first . ' ' . $last ), self::jalali_date( $date ), $time ), array( 'type' => 'booking', 'appointment_id' => absint( $appointment['id'] ?? 0 ) ) ) ); }
 		wp_send_json_success( array( 'id' => absint( $appointment['id'] ?? 0 ) ) );
 	}
