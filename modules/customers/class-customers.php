@@ -94,6 +94,46 @@ final class HMN_CRM_Customers implements HMN_CRM_Module_Interface {
 		return $customers;
 	}
 
+	/** Server-side engine search: GET /customers?q=... (LIKE on first/last name, phone, email, notes). */
+	public static function search_engine( $query = '', $limit = 10 ) {
+		$args = array( 'length' => max( 1, absint( $limit ) ), 'sort' => '-id' );
+		if ( '' !== (string) $query ) {
+			$args['q'] = (string) $query;
+		}
+		$rows = HMN_CRM_EasyAppointments::request( 'GET', 'customers', null, $args );
+		if ( is_wp_error( $rows ) ) {
+			return $rows;
+		}
+		$out = array();
+		foreach ( (array) $rows as $row ) {
+			$out[] = array(
+				'id'    => absint( $row['id'] ?? 0 ),
+				'first' => sanitize_text_field( $row['firstName'] ?? ( $row['first_name'] ?? '' ) ),
+				'last'  => sanitize_text_field( $row['lastName'] ?? ( $row['last_name'] ?? '' ) ),
+				'phone' => sanitize_text_field( $row['phone'] ?? ( $row['phone_number'] ?? '' ) ),
+			);
+		}
+		return $out;
+	}
+
+	/** Fetch a small set of engine customers by ID (keyed by ID) for rendering linked records. */
+	public static function find_many_by_ids( array $ids ) {
+		$ids    = array_values( array_unique( array_filter( array_map( 'absint', $ids ) ) ) );
+		$result = array();
+		foreach ( $ids as $id ) {
+			$row = HMN_CRM_EasyAppointments::request( 'GET', 'customers/' . $id );
+			if ( is_wp_error( $row ) || ! is_array( $row ) ) {
+				continue;
+			}
+			$result[ $id ] = array(
+				'id'    => $id,
+				'name'  => trim( sanitize_text_field( $row['firstName'] ?? ( $row['first_name'] ?? '' ) ) . ' ' . sanitize_text_field( $row['lastName'] ?? ( $row['last_name'] ?? '' ) ) ),
+				'phone' => sanitize_text_field( $row['phone'] ?? ( $row['phone_number'] ?? '' ) ),
+			);
+		}
+		return $result;
+	}
+
 	/** Find the exact engine customer by mobile number. */
 	public static function find_by_phone( $phone ) {
 		$phone = preg_replace( '/\D+/', '', (string) $phone );

@@ -2,7 +2,7 @@
 /*
 Plugin Name: پنل هومانا
 Description:  پنل مشتری مداری هومانا با قابلیت رزرو نوبت و حسابداری
-Version: 5.1.3
+Version: 5.1.4
 Author: Houman
 */
 

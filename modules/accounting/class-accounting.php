@@ -260,31 +260,73 @@ final class HMN_CRM_Accounting implements HMN_CRM_Module_Interface {
 		wp_send_json_success( array( 'categories' => $cats ) );
 	}
 
-	/** Search patients by name (or file number) for the transaction form. */
+	/** Normalize Persian/Arabic digits to ASCII and fold Arabic letters to Persian ones. */
+	public static function normalize_search_term( $text ) {
+		$text = (string) $text;
+		$map  = array(
+			'۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+			'۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+			'٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+			'٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+			'ي' => 'ی', 'ك' => 'ک',
+		);
+		return trim( strtr( $text, $map ) );
+	}
+
+	/** Live server-side patient search backed by GET /customers?q= (no full patient dump). */
 	public function patient_search_ajax() {
 		if ( ! HMN_CRM_Core::can( HMN_CRM_Core::CAP_MANAGE_ACCOUNTING ) || ! check_ajax_referer( 'hmn_crm_accounting', 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => 'دسترسی نامعتبر است.' ), 403 );
 		}
-		$query = sanitize_text_field( wp_unslash( $_POST['q'] ?? '' ) );
-		$all   = self::patients();
-		if ( is_wp_error( $all ) || ! $all ) {
-			wp_send_json_success( array( 'results' => array() ) );
+		$query = self::normalize_search_term( wp_unslash( $_POST['q'] ?? '' ) );
+		if ( ! class_exists( 'HMN_CRM_Customers' ) ) {
+			wp_send_json_error( array( 'message' => 'ماژول بیماران در دسترس نیست.' ), 500 );
 		}
-		$query = strtr( $query, array( 'ي' => 'ی', 'ك' => 'ک' ) );
-		$norm  = static function ( $text ) use ( $query ) {
-			return strtr( trim( (string) $text ), array( 'ي' => 'ی', 'ك' => 'ک' ) );
-		};
-		$results = array();
-		if ( '' === $query ) {
-			foreach ( array_slice( $all, 0, 10 ) as $p ) { $results[] = $p; }
+		// Explicit "id:123" queries (edit-mode fallback): fetch that exact customer.
+		$by_id_query = null;
+		if ( preg_match( '/^id:(\d+)$/', $query, $id_match ) ) {
+			$by_id_query = absint( $id_match[1] );
+		}
+		// Phone-style queries: strip separators, convert 0098/98/9 prefixes to 0.
+		$phone = preg_replace( '/\D+/', '', $query );
+		$is_phone_query = (bool) preg_match( '/^(?:(?:00)?98|0)?9\d{8,9}$/', $phone );
+		if ( $is_phone_query ) {
+			if ( '0098' === substr( $phone, 0, 4 ) ) { $phone = '0' . substr( $phone, 4 ); }
+			elseif ( '98' === substr( $phone, 0, 2 ) ) { $phone = '0' . substr( $phone, 2 ); }
+			elseif ( '0' !== substr( $phone, 0, 1 ) ) { $phone = '0' . $phone; }
+			$query = $phone; // EA stores phone_number as entered (09xxxxxxxxx) and LIKE-matches it.
+		}
+		if ( $by_id_query ) {
+			$row = HMN_CRM_EasyAppointments::request( 'GET', 'customers/' . $by_id_query );
+			if ( is_wp_error( $row ) ) {
+				wp_send_json_error( array( 'message' => $row->get_error_message() ), 502 );
+			}
+			$results = is_array( $row ) && ! empty( $row['id'] ) ? array( $row ) : array();
 		} else {
-			foreach ( $all as $p ) {
-				$hay = $norm( $p['name'] . ' ' . $p['file'] );
-				if ( false !== mb_stripos( $hay, $query ) ) { $results[] = $p; }
-				if ( count( $results ) >= 10 ) { break; }
+			$results = HMN_CRM_Customers::search_engine( $query, 10 );
+			if ( is_wp_error( $results ) ) {
+				wp_send_json_error( array( 'message' => $results->get_error_message() ), 502 );
 			}
 		}
-		wp_send_json_success( array( 'results' => $results ) );
+		// Engine LIKE-match may miss stored variants (e.g. stored 912... vs typed 0912...):
+		// verify digit-only tail equality per row and drop false positives.
+		if ( $is_phone_query ) {
+			$tail = ltrim( $phone, '0' );
+			$results = array_values( array_filter( $results, static function ( $row ) use ( $tail ) {
+				$row_phone = preg_replace( '/\D+/', '', (string) ( $row['phone'] ?? '' ) );
+				return '' !== $row_phone && substr( $row_phone, -strlen( $tail ) ) === $tail;
+			} ) );
+		}
+		$out = array();
+		foreach ( array_slice( $results, 0, 10 ) as $row ) {
+			$out[] = array(
+				'id'   => absint( $row['id'] ?? 0 ),
+				'name' => trim( sanitize_text_field( $row['first'] ?? '' ) . ' ' . sanitize_text_field( $row['last'] ?? '' ) ),
+				'phone' => sanitize_text_field( $row['phone'] ?? '' ),
+				'file' => '',
+			);
+		}
+		wp_send_json_success( array( 'results' => $out ) );
 	}
 
 	/** Create or rename a category or payment method (accounting settings). */
@@ -371,14 +413,16 @@ final class HMN_CRM_Accounting implements HMN_CRM_Module_Interface {
 		$date = preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date ) ? $date : wp_date( 'Y-m-d' );
 		$day   = self::day_report( $date );
 		$month = self::month_report( self::jalali_month_start( $date ), self::jalali_month_end( $date ) );
-		$patients = self::patients();
-		$by_id = array();
-		foreach ( $patients as $p ) { $by_id[ $p['id'] ] = $p; }
+		// Only load names of patients actually linked to today's transactions;
+		// the transaction form uses live server-side search instead of a full dump.
+		$by_id    = class_exists( 'HMN_CRM_Customers' ) ? HMN_CRM_Customers::find_many_by_ids( array_column( $day['items'], 'customer_id' ) ) : array();
+		// Live patient search hint: typing matches name, last name or mobile number server-side.
+		$patients = $by_id; // Only patients linked to today's transactions (for name rendering).
 		$pay_methods = self::payment_methods();
 		$day_name = HMN_CRM_Dashboard::hmn_public_jalali( $date, 'l، j F Y' );
 		?>
 <!doctype html><html <?php language_attributes(); ?> dir="rtl"><head><meta charset="<?php bloginfo( 'charset' ); ?>"><meta name="viewport" content="width=device-width,initial-scale=1"><title>حسابداری | HMN CRM</title><style><?php HMN_CRM_Dashboard::portal_styles(); ?></style><style>
-.hmn-accounting{display:grid;gap:20px}.hmn-ac-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;color:var(--ink)}.hmn-ac-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.hmn-ac-summary>div{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 6px 22px rgba(22,32,51,.035)}.hmn-ac-summary span{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}.hmn-ac-summary strong{font-size:19px}.hmn-ac-summary .is-income strong{color:#027a48}.hmn-ac-summary .is-expense strong{color:#b42318}.hmn-ac-workspace{display:grid;grid-template-columns:315px minmax(0,1fr);gap:22px}.hmn-ac-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}.hmn-ac-new{border:0;border-radius:9px;background:var(--brand);color:#fff;padding:11px 18px;font:inherit;font-weight:700;cursor:pointer}.hmn-ac-table{width:100%;border-collapse:collapse;min-width:0}.hmn-ac-table th,.hmn-ac-table td{padding:12px;text-align:right;border-bottom:1px solid var(--line);white-space:normal;vertical-align:middle}.hmn-ac-table th{color:var(--muted);font-size:12px;font-weight:700;background:#fbfcfe}.hmn-ac-table .is-income{color:#027a48;font-weight:700}.hmn-ac-table .is-expense{color:#b42318;font-weight:700}.hmn-ac-row-actions{display:flex;gap:6px;justify-content:flex-end}.hmn-ac-row-actions button{border:0;border-radius:8px;padding:7px 13px;font:inherit;font-size:12px;cursor:pointer;background:var(--soft);color:var(--brand)}.hmn-ac-row-actions .is-danger{background:#fff1f3;color:#b42318}.hmn-ac-modal{position:fixed;inset:0;z-index:1003;background:rgba(16,24,40,.45);display:grid;place-items:center;padding:16px}.hmn-ac-modal[hidden]{display:none}.hmn-ac-dialog{width:min(100%,470px);background:var(--surface);color:var(--ink);border-radius:16px;padding:24px}.hmn-ac-dialog h3{margin:0 0 14px}.hmn-ac-dialog label{display:grid;gap:7px;margin-top:13px;font-weight:700;font-size:13px}.hmn-ac-dialog input,.hmn-ac-dialog select,.hmn-ac-dialog textarea{min-height:42px;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font:inherit;background:var(--surface);color:var(--ink)}.hmn-ac-dialog textarea{min-height:70px}.hmn-ac-dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.hmn-ac-dialog button[type=submit]{margin-top:18px;width:100%;height:46px;border:0;border-radius:9px;background:var(--brand);color:#fff;font:inherit;font-weight:700;cursor:pointer}.hmn-ac-msg{margin-top:10px;min-height:18px;font-size:12px;color:#b42318}.hmn-ac-close{float:left;border:0;background:#f2f4f7;border-radius:50%;width:32px;height:32px;font-size:20px;cursor:pointer}.hmn-ac-cat-add{display:flex;gap:6px;margin-top:8px}.hmn-ac-cat-add input{flex:1}.hmn-ac-cat-add button{border:0;border-radius:8px;background:var(--soft);color:var(--brand);padding:0 14px;cursor:pointer}.hmn-ac-type-switch{display:flex;background:#f2f4f8;border-radius:9px;padding:4px;gap:4px}.hmn-ac-type-switch button{flex:1;border:0;background:transparent;color:var(--muted);border-radius:6px;padding:8px;font:inherit;font-weight:700;cursor:pointer}.hmn-ac-type-switch button.is-active{background:#fff;color:var(--brand);box-shadow:0 1px 4px #dfe2eb}.hmn-dark .hmn-ac-dialog{background:var(--surface)}.hmn-dark .hmn-ac-type-switch{background:#283147}.hmn-dark .hmn-ac-type-switch button.is-active{background:#222b40;color:var(--ink)}.hmn-dark .hmn-ac-table th{background:#222b40;color:var(--ink)}.hmn-dark .hmn-ac-row-actions button{background:#2a3150;color:var(--ink)}.hmn-dark .hmn-ac-row-actions .is-danger{background:#3a1d24;color:#ff9ba3}.hmn-dark .hmn-ac-close{background:#2a3150;color:var(--ink)}@media(max-width:980px){.hmn-ac-workspace{grid-template-columns:1fr}.hmn-ac-summary{grid-template-columns:1fr}.hmn-ac-dialog .grid2{grid-template-columns:1fr}}.hmn-ac-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.hmn-ac-cal-head button{border:1px solid var(--line);background:var(--surface);color:var(--brand);border-radius:8px;width:38px;height:34px;font-size:22px;cursor:pointer}.hmn-ac-cal-head strong{font-size:15px}.hmn-ac-patient-wrap{position:relative}.hmn-ac-patient-list{position:absolute;top:100%;right:0;left:0;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(16,24,40,.14);max-height:220px;overflow:auto;margin-top:4px;padding:4px}.hmn-ac-patient-list button{display:block;width:100%;text-align:right;border:0;background:transparent;border-radius:7px;padding:9px 11px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}.hmn-ac-patient-list button:hover,.hmn-ac-patient-list button.is-active{background:var(--soft);color:var(--brand)}.hmn-ac-patient-list .hmn-ac-patient-empty{padding:10px 11px;color:var(--muted);font-size:12px;text-align:center}.hmn-ac-patient-clear{border:0;background:transparent;color:#b42318;font:inherit;font-size:12px;cursor:pointer;padding:0;margin-top:6px;display:none}
+.hmn-accounting{display:grid;gap:20px}.hmn-ac-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;color:var(--ink)}.hmn-ac-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.hmn-ac-summary>div{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 6px 22px rgba(22,32,51,.035)}.hmn-ac-summary span{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}.hmn-ac-summary strong{font-size:19px}.hmn-ac-summary .is-income strong{color:#027a48}.hmn-ac-summary .is-expense strong{color:#b42318}.hmn-ac-workspace{display:grid;grid-template-columns:315px minmax(0,1fr);gap:22px}.hmn-ac-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}.hmn-ac-new{border:0;border-radius:9px;background:var(--brand);color:#fff;padding:11px 18px;font:inherit;font-weight:700;cursor:pointer}.hmn-ac-table{width:100%;border-collapse:collapse;min-width:0}.hmn-ac-table th,.hmn-ac-table td{padding:12px;text-align:right;border-bottom:1px solid var(--line);white-space:normal;vertical-align:middle}.hmn-ac-table th{color:var(--muted);font-size:12px;font-weight:700;background:#fbfcfe}.hmn-ac-table .is-income{color:#027a48;font-weight:700}.hmn-ac-table .is-expense{color:#b42318;font-weight:700}.hmn-ac-row-actions{display:flex;gap:6px;justify-content:flex-end}.hmn-ac-row-actions button{border:0;border-radius:8px;padding:7px 13px;font:inherit;font-size:12px;cursor:pointer;background:var(--soft);color:var(--brand)}.hmn-ac-row-actions .is-danger{background:#fff1f3;color:#b42318}.hmn-ac-modal{position:fixed;inset:0;z-index:1003;background:rgba(16,24,40,.45);display:grid;place-items:center;padding:16px}.hmn-ac-modal[hidden]{display:none}.hmn-ac-dialog{width:min(100%,470px);background:var(--surface);color:var(--ink);border-radius:16px;padding:24px}.hmn-ac-dialog h3{margin:0 0 14px}.hmn-ac-dialog label{display:grid;gap:7px;margin-top:13px;font-weight:700;font-size:13px}.hmn-ac-dialog input,.hmn-ac-dialog select,.hmn-ac-dialog textarea{min-height:42px;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font:inherit;background:var(--surface);color:var(--ink)}.hmn-ac-dialog textarea{min-height:70px}.hmn-ac-dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.hmn-ac-dialog button[type=submit]{margin-top:18px;width:100%;height:46px;border:0;border-radius:9px;background:var(--brand);color:#fff;font:inherit;font-weight:700;cursor:pointer}.hmn-ac-msg{margin-top:10px;min-height:18px;font-size:12px;color:#b42318}.hmn-ac-close{float:left;border:0;background:#f2f4f7;border-radius:50%;width:32px;height:32px;font-size:20px;cursor:pointer}.hmn-ac-type-switch{display:flex;background:#f2f4f8;border-radius:9px;padding:4px;gap:4px}.hmn-ac-type-switch button{flex:1;border:0;background:transparent;color:var(--muted);border-radius:6px;padding:8px;font:inherit;font-weight:700;cursor:pointer}.hmn-ac-type-switch button.is-active{background:#fff;color:var(--brand);box-shadow:0 1px 4px #dfe2eb}.hmn-dark .hmn-ac-dialog{background:var(--surface)}.hmn-dark .hmn-ac-type-switch{background:#283147}.hmn-dark .hmn-ac-type-switch button.is-active{background:#222b40;color:var(--ink)}.hmn-dark .hmn-ac-table th{background:#222b40;color:var(--ink)}.hmn-dark .hmn-ac-row-actions button{background:#2a3150;color:var(--ink)}.hmn-dark .hmn-ac-row-actions .is-danger{background:#3a1d24;color:#ff9ba3}.hmn-dark .hmn-ac-close{background:#2a3150;color:var(--ink)}@media(max-width:980px){.hmn-ac-workspace{grid-template-columns:1fr}.hmn-ac-summary{grid-template-columns:1fr}.hmn-ac-dialog .grid2{grid-template-columns:1fr}}.hmn-ac-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.hmn-ac-cal-head button{border:1px solid var(--line);background:var(--surface);color:var(--brand);border-radius:8px;width:38px;height:34px;font-size:22px;cursor:pointer}.hmn-ac-cal-head strong{font-size:15px}.hmn-ac-patient-wrap{position:relative}.hmn-ac-patient-list{position:absolute;top:100%;right:0;left:0;z-index:20;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(16,24,40,.14);max-height:220px;overflow:auto;margin-top:4px;padding:4px}.hmn-ac-patient-list button{display:block;width:100%;text-align:right;border:0;background:transparent;border-radius:7px;padding:9px 11px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}.hmn-ac-patient-list button:hover,.hmn-ac-patient-list button.is-active{background:var(--soft);color:var(--brand)}.hmn-ac-patient-list .hmn-ac-patient-empty{padding:10px 11px;color:var(--muted);font-size:12px;text-align:center}.hmn-ac-patient-clear{border:0;background:transparent;color:#b42318;font:inherit;font-size:12px;cursor:pointer;padding:0;margin-top:6px;display:none}
 </style></head><body class="hmn-portal-body"><div class="hmn-portal"><aside class="hmn-sidebar"><div class="hmn-brand"><span class="hmn-brand-mark">H</span><span>HMN CRM</span></div><nav class="hmn-nav"><a href="<?php echo esc_url( $base ); ?>">⌂ داشبورد نوبت‌ها</a><a href="<?php echo esc_url( add_query_arg( 'section', 'customers', $base ) ); ?>">♙ بیماران</a><a class="is-active" href="<?php echo esc_url( add_query_arg( 'section', 'accounting', $base ) ); ?>">۵ حسابداری</a><a href="<?php echo esc_url( add_query_arg( 'section', 'scheduling', $base ) ); ?>">⚙ تنظیمات نوبت‌دهی</a><a href="<?php echo esc_url( add_query_arg( 'section', 'settings', $base ) ); ?>">⚙ تنظیمات پنل</a><a href="<?php echo esc_url( add_query_arg( 'section', 'accounting-settings', $base ) ); ?>">⚙ تنظیمات حسابداری</a></nav><?php HMN_CRM_Dashboard::portal_sms_status(); ?><div class="hmn-user"><span class="hmn-avatar"><?php echo esc_html( mb_substr( $user->display_name ? $user->display_name : $user->user_login, 0, 1 ) ); ?></span><div><strong><?php echo esc_html( $user->display_name ); ?></strong><a href="<?php echo esc_url( wp_logout_url( $base ) ); ?>">خروج از حساب</a></div></div></aside><main class="hmn-main"><header class="hmn-topbar"><button class="hmn-menu" type="button" aria-label="باز کردن منو">☰</button><div><p class="hmn-eyebrow">مدیریت مالی مرکز</p><h1>حسابداری</h1></div><a class="hmn-today" href="<?php echo esc_url( add_query_arg( array( 'section' => 'accounting', 'date' => wp_date( 'Y-m-d' ) ), $base ) ); ?>">امروز</a></header>
 <section class="hmn-ac-summary">
 	<div class="is-income"><span>درآمد این ماه</span><strong><?php echo esc_html( number_format( $month['income'] ) ); ?> تومان</strong></div>
@@ -405,7 +449,6 @@ final class HMN_CRM_Accounting implements HMN_CRM_Module_Interface {
 <div class="grid2"><label>دسته<select name="category" id="hmn-ac-category"></select></label><label>روش پرداخت<select name="payment_method" id="hmn-ac-payment"><?php foreach ( $pay_methods as $pm_key => $pm_label ) : ?><option value="<?php echo esc_attr( $pm_key ); ?>"><?php echo esc_html( $pm_label ); ?></option><?php endforeach; ?></select></label></div>
 <label>بیمار (اختیاری)<input name="patient_search" id="hmn-ac-patient-search" autocomplete="off" placeholder="جست‌وجوی نام بیمار…"><input type="hidden" name="customer_id" id="hmn-ac-patient-id"><div class="hmn-ac-patient-list" id="hmn-ac-patient-list" hidden></div><button type="button" class="hmn-ac-patient-clear" id="hmn-ac-patient-clear">حذف اتصال بیمار</button></label>
 <label>شرح<textarea name="description" placeholder="توضیح تراکنش…"></textarea></label>
-<div class="hmn-ac-cat-add"><input id="hmn-ac-new-cat" placeholder="افزودن دسته جدید…"><button type="button" id="hmn-ac-add-cat">افزودن</button></div>
 <button type="submit">ذخیره تراکنش</button><p class="hmn-ac-msg" id="hmn-ac-message"></p>
 </form></div>
 <script>(function(){
@@ -426,15 +469,15 @@ function esc(s){var d=document.createElement('div');d.textContent=s||'';return d
 function payLabel(v){var sel=document.getElementById('hmn-ac-payment');for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===v)return sel.options[i].textContent}return v}
 function patientName(id){return window.__hmnAcPatients&&window.__hmnAcPatients[id]?window.__hmnAcPatients[id]:''}
 function clearPatient(){form.elements.customer_id.value='';form.elements.patient_search.value='';document.getElementById('hmn-ac-patient-clear').style.display='none'}
-var searchBox=document.getElementById('hmn-ac-patient-search'),patientList=document.getElementById('hmn-ac-patient-list'),searchTimer=null;
-searchBox.addEventListener('input',function(){clearTimeout(searchTimer);var q=searchBox.value.trim();searchTimer=setTimeout(function(){req('hmn_crm_accounting_patient_search',{q:q}).then(function(d){patientList.innerHTML='';(d.results||[]).forEach(function(p){var b=document.createElement('button');b.type='button';b.textContent=p.name+(p.file?' · پرونده '+p.file:'');b.onclick=function(){form.elements.customer_id.value=p.id;searchBox.value=p.name;document.getElementById('hmn-ac-patient-clear').style.display='inline';patientList.hidden=true};patientList.appendChild(b)});if(!(d.results||[]).length){var e=document.createElement('div');e.className='hmn-ac-patient-empty';e.textContent=q?'بیماری یافت نشد.':'— بدون اتصال —';patientList.appendChild(e)}patientList.hidden=false}).catch(function(){patientList.hidden=true})},250)});
-searchBox.addEventListener('focus',function(){patientList.hidden=false});
+var searchBox=document.getElementById('hmn-ac-patient-search'),patientList=document.getElementById('hmn-ac-patient-list'),searchTimer=null,searchAbort=null;
+searchBox.addEventListener('input',function(){clearTimeout(searchTimer);var q=searchBox.value.trim();if(searchAbort)searchAbort.abort();if(!q){patientList.hidden=true;patientList.innerHTML='';return}searchTimer=setTimeout(function(){searchAbort=new AbortController();fetch(ajax,{method:'POST',signal:searchAbort.signal,headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'hmn_crm_accounting_patient_search',nonce:nonce,q:q})}).then(function(r){return r.json()}).then(function(r){if(!r.success)throw Error(r.data&&r.data.message||'خطا');patientList.innerHTML='';(r.data.results||[]).forEach(function(p){var b=document.createElement('button');b.type='button';b.textContent=p.name+(p.phone?' · '+p.phone:'');b.onclick=function(){form.elements.customer_id.value=p.id;searchBox.value=p.name+(p.phone?' ('+p.phone+')':'');document.getElementById('hmn-ac-patient-clear').style.display='inline';patientList.hidden=true};patientList.appendChild(b)});if(!(r.data.results||[]).length){var e=document.createElement('div');e.className='hmn-ac-patient-empty';e.textContent='بیماری با این مشخصات یافت نشد.';patientList.appendChild(e)}patientList.hidden=false}).catch(function(err){if(err&&err.name==='AbortError')return;patientList.hidden=true})},250)});
+searchBox.addEventListener('focus',function(){if(form.elements.customer_id.value&&searchBox.value){patientList.hidden=true;return}patientList.hidden=false});
 document.addEventListener('click',function(e){if(!e.target.closest('#hmn-ac-patient-search')&&!e.target.closest('#hmn-ac-patient-list'))patientList.hidden=true});
 searchBox.addEventListener('keydown',function(e){if(e.key==='Escape')patientList.hidden=true});
-function openForm(data){form.reset();form.elements.id.value=data&&data.id?data.id:'';type=data&&data.type||'income';document.querySelectorAll('#hmn-ac-type button').forEach(function(x){x.classList.toggle('is-active',x.dataset.type===type)});fillCats(type);clearPatient();if(data){document.getElementById('hmn-ac-form-title').textContent='ویرایش تراکنش';form.elements.category.value=data.category||'';form.elements.amount.value=String(data.amount||'');form.elements.description.value=data.description||'';form.elements.payment_method.value=data.payment_method||'cash';var pid=String(data.customer_id||'');if(pid&&patientName(pid)){form.elements.customer_id.value=pid;searchBox.value=patientName(pid);document.getElementById('hmn-ac-patient-clear').style.display='inline'}}else{document.getElementById('hmn-ac-form-title').textContent='ثبت تراکنش'}msg.textContent='';modal.hidden=false}
+function resolvePatientName(pid,cb){var known=patientName(pid);if(known){cb(known);return}req('hmn_crm_accounting_patient_search',{q:'id:'+pid}).then(function(d){var hit=(d.results||[]).filter(function(p){return String(p.id)===String(pid)})[0];cb(hit?hit.name+(hit.phone?' ('+hit.phone+')':''):'بیمار #'+pid)})}
+function openForm(data){form.reset();form.elements.id.value=data&&data.id?data.id:'';type=data&&data.type||'income';document.querySelectorAll('#hmn-ac-type button').forEach(function(x){x.classList.toggle('is-active',x.dataset.type===type)});fillCats(type);clearPatient();if(data){document.getElementById('hmn-ac-form-title').textContent='ویرایش تراکنش';form.elements.category.value=data.category||'';form.elements.amount.value=String(data.amount||'');form.elements.description.value=data.description||'';form.elements.payment_method.value=data.payment_method||'cash';var pid=String(data.customer_id||'');if(pid&&'0'!==pid){form.elements.customer_id.value=pid;searchBox.value='در حال دریافت نام بیمار…';document.getElementById('hmn-ac-patient-clear').style.display='inline';resolvePatientName(pid,function(name){if(form.elements.customer_id.value===pid){searchBox.value=name}})}}else{document.getElementById('hmn-ac-form-title').textContent='ثبت تراکنش'}msg.textContent='';modal.hidden=false}
 document.getElementById('hmn-ac-new').onclick=function(){openForm(null)};
 document.querySelectorAll('#hmn-ac-type button').forEach(function(b){b.onclick=function(){type=b.dataset.type;document.querySelectorAll('#hmn-ac-type button').forEach(function(x){x.classList.toggle('is-active',x===b)});fillCats(type)}});
-document.getElementById('hmn-ac-add-cat').onclick=function(){var input=document.getElementById('hmn-ac-new-cat'),v=input.value.trim();if(!v)return;req('hmn_crm_accounting_categories',{cat_type:type,cat_value:v}).then(function(d){cats=d.categories;fillCats(type);var sel=document.getElementById('hmn-ac-category');sel.value=v;input.value=''}).catch(x=>msg.textContent=x.message)};
 form.onsubmit=function(e){e.preventDefault();var amount=(form.elements.amount.value||'').replace(/[۰-۹]/g,function(c){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)}).replace(/[^\d]/g,'');msg.textContent='در حال ذخیره…';req('hmn_crm_accounting_save',{id:form.elements.id.value,date:current,type:type,category:form.elements.category.value,amount:amount,description:form.elements.description.value,customer_id:form.elements.customer_id.value,payment_method:form.elements.payment_method.value}).then(function(){modal.hidden=true;loadDay()}).catch(x=>msg.textContent=x.message)};
 var close=document.querySelector('.hmn-ac-close');close.onclick=function(){modal.hidden=true};modal.onclick=function(e){if(e.target===modal)modal.hidden=true};
 document.getElementById('hmn-ac-patient-clear').onclick=function(){clearPatient()};
